@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+dist/
+build/
+.next/
+generated/
+apps/backend/generated/
+apps/backend/.env
