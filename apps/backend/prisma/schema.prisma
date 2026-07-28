@@ -7,9 +7,71 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  name      String?
+model Space {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  zones     Zone[]
+  users     User[]
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Zone {
+  id        String   @id @default(cuid())
+  name      String
+  spaceId   String
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  desks     Desk[]
+  rooms     Room[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Desk {
+  id        String   @id @default(cuid())
+  name      String
+  zoneId    String
+  zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  name      String
+  capacity  Int
+  zoneId    String
+  zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Booking {
+  id           String   @id @default(cuid())
+  bookableType String   // "DESK" or "ROOM"
+  bookableId   String   // the Desk.id or Room.id, no formal FK
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  startTime    DateTime
+  endTime      DateTime
+  createdAt    DateTime @default(now())
+}
+
+enum Role {
+  PLATFORM_ADMIN
+  SPACE_MANAGER
+  MEMBER
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  role      Role
+  spaceId   String?
+  space     Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  bookings  Booking[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
