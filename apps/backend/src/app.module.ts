@@ -1,10 +1,18 @@
+// apps/backend/src/app.module.ts
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { APP_GUARD } from '@nestjs/core';
+import { TenantGuard } from './auth/tenant.guard';
+// ... your existing imports (spaces, zones, desks, rooms, bookings modules, etc.)
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    // ...existing module imports
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: TenantGuard,
+    },
+  ],
 })
 export class AppModule {}
