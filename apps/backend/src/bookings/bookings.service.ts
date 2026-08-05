@@ -43,3 +43,35 @@ export class BookingsService {
     throw new BadRequestException(`Unknown bookableType: ${bookableType}`);
   }
 }
+// apps/backend/src/bookings/bookings.service.ts (continued)
+  async create(dto: CreateBookingDto, spaceId: string, userId: string) {
+    const { bookableType, bookableId, startTime, endTime } = dto;
+
+    if (new Date(startTime) >= new Date(endTime)) {
+      throw new BadRequestException('startTime must be before endTime');
+    }
+
+    // Confirm the desk/room exists and belongs to this tenant BEFORE attempting the write —
+    // fails fast with a clear 404 instead of a confusing DB constraint error.
+    await this.resolveBookable(bookableType, bookableId, spaceId);
+
+    try {
+      // The transaction here is less about "multiple statements that must succeed together"
+      // (it's really just one insert) and more about giving Prisma/Postgres a clean boundary
+      // to surface the unique constraint violation as a catchable error rather than a
+      // raw unhandled DB exception.
+      return await this.prisma.$transaction(async (tx) => {
+        return tx.booking.create({
+          data: { bookableType, bookableId, userId, startTime, endTime },
+        });
+      });
+    } catch (err: any) {
+      // Prisma error code P2002 = unique constraint violation
+      if (err.code === 'P2002') {
+        throw new ForbiddenException(
+          'This slot is already booked (exact start-time conflict)',
+        );
+      }
+      throw err;
+    }
+  }
