@@ -49,13 +49,15 @@ model Room {
 
 model Booking {
   id           String   @id @default(cuid())
-  bookableType String   // "DESK" or "ROOM"
-  bookableId   String   // the Desk.id or Room.id, no formal FK
+  bookableType String
+  bookableId   String
   userId       String
   user         User     @relation(fields: [userId], references: [id])
   startTime    DateTime
   endTime      DateTime
   createdAt    DateTime @default(now())
+
+  @@unique([bookableType, bookableId, startTime])
 }
 
 enum Role {
