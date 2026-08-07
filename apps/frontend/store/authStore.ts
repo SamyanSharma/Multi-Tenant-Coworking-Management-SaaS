@@ -1,0 +1,19 @@
+import { create } from 'zustand';
+
+export type Role = 'PLATFORM_ADMIN' | 'SPACE_MANAGER' | 'MEMBER';
+
+interface AuthState {
+  token: string | null;
+  role: Role | null;
+  spaceId: string | null;   // null for PLATFORM_ADMIN, set for the other two roles
+  setAuth: (auth: { token: string; role: Role; spaceId: string | null }) => void;
+  logout: () => void;
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  token: null,
+  role: null,
+  spaceId: null,
+  setAuth: ({ token, role, spaceId }) => set({ token, role, spaceId }),
+  logout: () => set({ token: null, role: null, spaceId: null }),
+}));
