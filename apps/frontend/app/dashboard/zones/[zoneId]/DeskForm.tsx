@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useAuthStore } from '@/store/authStore';
+import { getAuthHeaders } from '@/lib/api';
 
 interface DeskFormProps {
   initialName?: string;
@@ -12,7 +12,6 @@ interface DeskFormProps {
 
 export default function DeskForm({ initialName = '', deskId, onSuccess }: DeskFormProps) {
   const { zoneId } = useParams<{ zoneId: string }>();
-  const token = useAuthStore((s) => s.token);
   const [name, setName] = useState(initialName);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,25 +24,23 @@ export default function DeskForm({ initialName = '', deskId, onSuccess }: DeskFo
     setError(null);
 
     try {
-      const res = await fetch(
-        isEditing ? `/api/desks/${deskId}` : '/api/desks',
-        {
-          method: isEditing ? 'PATCH' : 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          // zoneId comes from the route, not a form field — a desk
-          // always belongs to the zone the user is currently viewing
-          body: JSON.stringify({ name, zoneId }),
-        }
-      );
+      const base = process.env.NEXT_PUBLIC_API_URL;
+      const res = await fetch(isEditing ? `${base}/desks/${deskId}` : `${base}/desks`, {
+        method: isEditing ? 'PATCH' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        // zoneId comes from the route, not a form field
+        body: JSON.stringify({ name, zoneId }),
+      });
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.message ?? `Request failed (${res.status})`);
       }
 
+      setName('');
       onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
