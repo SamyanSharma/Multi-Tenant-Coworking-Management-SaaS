@@ -5,7 +5,7 @@ export type Role = 'PLATFORM_ADMIN' | 'SPACE_MANAGER' | 'MEMBER';
 interface AuthState {
   token: string | null;
   role: Role | null;
-  spaceId: string | null;   // null for PLATFORM_ADMIN, set for the other two roles
+  spaceId: string | null; // null for PLATFORM_ADMIN, set for the other two roles
   setAuth: (auth: { token: string; role: Role; spaceId: string | null }) => void;
   logout: () => void;
 }
