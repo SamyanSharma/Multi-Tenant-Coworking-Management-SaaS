@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useAuthStore } from '@/store/authStore';
+import { getAuthHeaders } from '@/lib/api';
 
 interface Space {
   id: string;
@@ -11,7 +11,6 @@ interface Space {
 }
 
 export default function SpacesPage() {
-  const token = useAuthStore((s) => s.token);
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -19,8 +18,8 @@ export default function SpacesPage() {
     async function fetchSpaces() {
       setLoading(true);
       try {
-        const res = await fetch('/api/spaces', {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/spaces`, {
+          headers: getAuthHeaders(),
         });
         const data: Space[] = await res.json();
         setSpaces(data);
@@ -29,7 +28,7 @@ export default function SpacesPage() {
       }
     }
     fetchSpaces();
-  }, [token]);
+  }, []);
 
   if (loading) return <div>Loading spaces…</div>;
 
