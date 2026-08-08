@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getAuthHeaders } from '@/lib/api';
 
 export type BookableType = 'DESK' | 'ROOM';
 
@@ -6,7 +7,7 @@ interface BookingDraft {
   bookableType: BookableType | null;
   bookableId: string | null;
   startTime: string | null; // ISO string
-  endTime: string | null;   // ISO string
+  endTime: string | null; // ISO string
 }
 
 interface BookingState {
@@ -44,15 +45,18 @@ export const useBookingStore = create<BookingState>((set, get) => ({
     set({ isSubmitting: true, error: null });
 
     try {
-      const res = await fetch('/api/bookings', {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/bookings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
         body: JSON.stringify(draft),
       });
 
       if (!res.ok) {
-        // Stage 4: this is where we catch Teammate A's concurrency
-        // rejection (double-booking) and show it to the user.
+        // NOTE: assumed shape until Teammate A's real backend/exception
+        // filter is confirmed — see Frontend_Sync_Checklist.md.
         const body = await res.json().catch(() => null);
         set({
           error: body?.message ?? 'Booking failed — that slot may already be taken.',
