@@ -30,10 +30,6 @@ export default function BookResourcePage() {
     if (success) {
       router.push('/dashboard/bookings');
     } else {
-      // A 409/400 from the unique-constraint rejection lands here via
-      // the store's `error` state. We flag it specifically as a
-      // scheduling conflict so the UI can nudge the user to pick a
-      // different time, rather than showing a generic failure.
       setConflict(true);
     }
   }
