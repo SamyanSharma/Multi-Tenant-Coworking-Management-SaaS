@@ -3,6 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
+import { getAuthHeaders } from '@/lib/api';
+import ZoneForm from './ZoneForm';
+import DeskForm from './DeskForm';
+import RoomForm from './RoomForm';
 
 interface Desk {
   id: string;
@@ -22,10 +26,11 @@ interface ZoneDetail {
 
 export default function ZoneDetailPage() {
   const { zoneId } = useParams<{ zoneId: string }>();
-  const token = useAuthStore((s) => s.token);
+  const role = useAuthStore((s) => s.role);
   const [zone, setZone] = useState<ZoneDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!zoneId) return;
@@ -34,8 +39,8 @@ export default function ZoneDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/zones/${zoneId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/zones/${zoneId}`, {
+          headers: getAuthHeaders(),
         });
         if (!res.ok) throw new Error(`Failed to load zone (${res.status})`);
         const data: ZoneDetail = await res.json();
@@ -48,11 +53,13 @@ export default function ZoneDetailPage() {
     }
 
     fetchZone();
-  }, [zoneId, token]);
+  }, [zoneId, refreshKey]);
 
   if (loading) return <div>Loading zone…</div>;
   if (error) return <div className="text-red-600">Error: {error}</div>;
   if (!zone) return <div>Zone not found.</div>;
+
+  const canManage = role === 'SPACE_MANAGER' || role === 'PLATFORM_ADMIN';
 
   return (
     <div className="flex flex-col gap-6">
@@ -79,6 +86,27 @@ export default function ZoneDetailPage() {
           ))}
         </div>
       </section>
+
+      {canManage && (
+        <section className="flex flex-col gap-6 border-t pt-6 mt-2">
+          <div>
+            <h2 className="text-sm font-medium text-slate-500 mb-2">Add a desk</h2>
+            <DeskForm onSuccess={() => setRefreshKey((k) => k + 1)} />
+          </div>
+          <div>
+            <h2 className="text-sm font-medium text-slate-500 mb-2">Add a room</h2>
+            <RoomForm onSuccess={() => setRefreshKey((k) => k + 1)} />
+          </div>
+          <div>
+            <h2 className="text-sm font-medium text-slate-500 mb-2">Edit this zone</h2>
+            <ZoneForm
+              zoneId={zone.id}
+              initialName={zone.name}
+              onSuccess={() => setRefreshKey((k) => k + 1)}
+            />
+          </div>
+        </section>
+      )}
     </div>
   );
 }
