@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useAuthStore } from '@/store/authStore';
+import { getAuthHeaders } from '@/lib/api';
 
 interface RoomFormProps {
   initialName?: string;
@@ -18,7 +18,6 @@ export default function RoomForm({
   onSuccess,
 }: RoomFormProps) {
   const { zoneId } = useParams<{ zoneId: string }>();
-  const token = useAuthStore((s) => s.token);
   const [name, setName] = useState(initialName);
   const [capacity, setCapacity] = useState(initialCapacity);
   const [submitting, setSubmitting] = useState(false);
@@ -38,23 +37,23 @@ export default function RoomForm({
     setError(null);
 
     try {
-      const res = await fetch(
-        isEditing ? `/api/rooms/${roomId}` : '/api/rooms',
-        {
-          method: isEditing ? 'PATCH' : 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ name, capacity, zoneId }),
-        }
-      );
+      const base = process.env.NEXT_PUBLIC_API_URL;
+      const res = await fetch(isEditing ? `${base}/rooms/${roomId}` : `${base}/rooms`, {
+        method: isEditing ? 'PATCH' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ name, capacity, zoneId }),
+      });
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.message ?? `Request failed (${res.status})`);
       }
 
+      setName('');
+      setCapacity(1);
       onSuccess?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
