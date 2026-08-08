@@ -1,20 +1,34 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  PLATFORM_ADMIN
+  SPACE_MANAGER
+  MEMBER
+}
+
+enum BookableType {
+  DESK
+  ROOM
+}
+
 model Space {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
-  zones     Zone[]
-  users     User[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  zones Zone[]
+  users User[]
 }
 
 model Zone {
@@ -22,10 +36,13 @@ model Zone {
   name      String
   spaceId   String
   space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  desks     Desk[]
-  rooms     Room[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  desks Desk[]
+  rooms Room[]
+
+  @@index([spaceId])
 }
 
 model Desk {
@@ -35,6 +52,8 @@ model Desk {
   zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([zoneId])
 }
 
 model Room {
@@ -45,23 +64,29 @@ model Room {
   zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([zoneId])
 }
 
+// Polymorphic booking: bookableId is NOT a formal FK (per ARCHITECTURE.md).
+// App code resolves bookableId against Desk or Room based on bookableType.
+// @@unique below is the Stage 4 "simple" concurrency guard — see
+// prisma/migrations/*_add_booking_overlap_exclusion for the stronger
+// range-overlap version discussed alongside it, which is NOT applied by
+// default (team decision pending — see PR description / ARCHITECTURE.md).
 model Booking {
-  id           String   @id @default(cuid())
-  bookableType String   // "DESK" or "ROOM"
-  bookableId   String   // the Desk.id or Room.id, no formal FK
+  id           String       @id @default(cuid())
+  bookableType BookableType
+  bookableId   String
   userId       String
-  user         User     @relation(fields: [userId], references: [id])
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   startTime    DateTime
   endTime      DateTime
-  createdAt    DateTime @default(now())
-}
+  createdAt    DateTime     @default(now())
 
-enum Role {
-  PLATFORM_ADMIN
-  SPACE_MANAGER
-  MEMBER
+  @@unique([bookableType, bookableId, startTime])
+  @@index([bookableType, bookableId])
+  @@index([userId])
 }
 
 model User {
@@ -69,9 +94,14 @@ model User {
   email     String    @unique
   name      String?
   role      Role
+  // Nullable: null for PLATFORM_ADMIN (not scoped to any space),
+  // always set for SPACE_MANAGER and MEMBER.
   spaceId   String?
   space     Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  bookings  Booking[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  bookings Booking[]
+
+  @@index([spaceId])
 }
