@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
+import { getAuthHeaders } from '@/lib/api';
 
 interface ZoneFormProps {
   initialName?: string;
@@ -11,7 +12,6 @@ interface ZoneFormProps {
 
 export default function ZoneForm({ initialName = '', zoneId, onSuccess }: ZoneFormProps) {
   const spaceId = useAuthStore((s) => s.spaceId);
-  const token = useAuthStore((s) => s.token);
   const [name, setName] = useState(initialName);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,11 +30,12 @@ export default function ZoneForm({ initialName = '', zoneId, onSuccess }: ZoneFo
     setError(null);
 
     try {
-      const res = await fetch(isEditing ? `/api/zones/${zoneId}` : '/api/zones', {
+      const base = process.env.NEXT_PUBLIC_API_URL;
+      const res = await fetch(isEditing ? `${base}/zones/${zoneId}` : `${base}/zones`, {
         method: isEditing ? 'PATCH' : 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...getAuthHeaders(),
         },
         // spaceId comes from the authenticated session, never a form field
         body: JSON.stringify({ name, spaceId }),
