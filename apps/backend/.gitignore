@@ -60,21 +60,3 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .agents/
 .claude/
 .windsurf/
-<<<<<<< HEAD
-"" 
-"# AI assistant skill docs - auto-generated locally, don't commit" 
-".agents/" 
-".claude/" 
-".windsurf/" 
-"" 
-"# AI assistant skill docs - auto-generated locally, don't commit" 
-".agents/" 
-".claude/" 
-".windsurf/" 
-=======
- 
-# AI assistant skill docs - auto-generated locally, don't commit 
-.agents/ 
-.claude/ 
-.windsurf/ 
->>>>>>> origin/Arpit
