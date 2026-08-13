@@ -21,8 +21,16 @@ export default function SpacesPage() {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/spaces`, {
           headers: getAuthHeaders(),
         });
+        if (!res.ok) {
+          console.error('Failed to fetch spaces:', res.status, await res.text());
+          setSpaces([]);
+          return;
+        }
         const data: Space[] = await res.json();
-        setSpaces(data);
+        setSpaces(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Network error fetching spaces:', err);
+        setSpaces([]);
       } finally {
         setLoading(false);
       }
