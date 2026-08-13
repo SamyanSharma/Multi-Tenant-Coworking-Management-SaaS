@@ -4,6 +4,7 @@ import { SpacesService } from './spaces.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
+import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
 
 @Controller('spaces')
 export class SpacesController {
@@ -11,6 +12,7 @@ export class SpacesController {
 
   @UseGuards(RbacGuard)
   @Roles(Role.PLATFORM_ADMIN)
+  @SkipTenantCheck()
   @Get()
   findAll() {
     return this.spacesService.findAll();
