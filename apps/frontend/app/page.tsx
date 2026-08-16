@@ -25,7 +25,7 @@ export default function Home() {
         <button
           className="bg-slate-900 text-white rounded px-4 py-2 text-sm"
           onClick={() =>
-            setAuth({ token: 'dummy', role: 'SPACE_MANAGER', spaceId: 'cmslf71ns0000n8ml4xvuk11r' })
+            setAuth({ token: 'dummy', role: 'SPACE_MANAGER', spaceId: 'cmslgiyh400003gmlmy7rvxvd' })
           }
         >
           Log in as Space Manager
@@ -33,7 +33,7 @@ export default function Home() {
         <button
           className="bg-slate-900 text-white rounded px-4 py-2 text-sm"
           onClick={() =>
-            setAuth({ token: 'dummy', role: 'MEMBER', spaceId: 'cmslf71ns0000n8ml4xvuk11r' })
+            setAuth({ token: 'dummy', role: 'MEMBER', spaceId: 'cmslgiyh400003gmlmy7rvxvd' })
           }
         >
           Log in as Member
