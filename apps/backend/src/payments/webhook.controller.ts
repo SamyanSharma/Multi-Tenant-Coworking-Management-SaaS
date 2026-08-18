@@ -112,6 +112,36 @@ export class WebhookController {
         break;
       }
 
+      case 'account.updated': {
+        const account = event.data.object as Stripe.Account;
+        const userId = account.metadata?.userId;
+
+        if (!userId) {
+          this.logger.warn(
+            `account.updated (${account.id}) has no userId in metadata`,
+          );
+          break;
+        }
+
+        // Onboarding is "complete" specifically when Stripe confirms the
+        // account can both receive charges and has submitted all
+        // required KYC details — checking only one of the two would let
+        // a partially-onboarded account be treated as ready, and a
+        // transfer to it would then fail at charge time instead of here.
+        const isComplete = Boolean(
+          account.charges_enabled && account.details_submitted,
+        );
+
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { stripeOnboardingComplete: isComplete },
+        });
+        this.logger.log(
+          `User ${userId} stripeOnboardingComplete=${isComplete}`,
+        );
+        break;
+      }
+
       default:
         // Deliberately silent for event types this system doesn't act
         // on yet — still returns 200 below so Stripe doesn't retry.

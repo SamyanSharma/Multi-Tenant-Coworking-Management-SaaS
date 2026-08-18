@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { BookableType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventsGateway } from '../events/events.gateway';
 import { CreateBookingDto } from './dto/create-booking.dto';
 
 // Prisma's unique-constraint-violation error code.
@@ -13,7 +14,10 @@ const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventsGateway: EventsGateway,
+  ) {}
 
   /**
    * Resolves bookableId -> the actual Desk or Room, and confirms it
@@ -107,11 +111,21 @@ export class BookingsService {
       // giving Prisma/Postgres a clean boundary to surface the unique
       // constraint violation as a catchable error rather than a raw
       // unhandled DB exception.
-      return await this.prisma.$transaction(async (tx) => {
+      const booking = await this.prisma.$transaction(async (tx) => {
         return tx.booking.create({
           data: { bookableType, bookableId, userId, startTime, endTime },
         });
       });
+
+      // Emitted AFTER the transaction commits, not inside it — a socket
+      // broadcast isn't part of the DB's atomicity guarantee, and we
+      // never want to notify clients about a booking that could still be
+      // rolled back. Scoped to this space's room only (see
+      // EventsGateway.emitBookingCreated) — a Space_Manager in a
+      // different tenant's room never receives this.
+      this.eventsGateway.emitBookingCreated(spaceId, booking);
+
+      return booking;
     } catch (err: unknown) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&

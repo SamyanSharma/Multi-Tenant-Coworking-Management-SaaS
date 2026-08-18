@@ -5,18 +5,21 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
-import { ROLES_KEY, Role } from './roles.decorator';
+import type { Request } from 'express';
+import { Role } from '@prisma/client';
+import { ROLES_KEY } from './roles.decorator';
 
-declare module 'express' {
-  interface Request {
-    userRole?: Role;
-  }
-}
-
+/**
+ * NOT registered globally — apply per-route/controller with @UseGuards
+ * alongside @Roles(...). Unlike TenantGuard (every route needs a tenant),
+ * not every route needs a role restriction, so this stays opt-in.
+ *
+ * Reads role from the x-user-role header as a placeholder until real auth
+ * exists (same caveat as TenantGuard's spaceId header).
+ */
 @Injectable()
 export class RbacGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
     const requiredRoles = this.reflector.getAllAndOverride<Role[]>(
@@ -24,8 +27,7 @@ export class RbacGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    // No @Roles() on this route at all → no restriction, let it through.
-    // (Distinct from an empty array, which would mean "nobody" — see note below.)
+    // No @Roles() declared at all -> no restriction from this guard.
     if (!requiredRoles) {
       return true;
     }
