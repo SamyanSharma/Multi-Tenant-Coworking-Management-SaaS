@@ -1,9 +1,10 @@
-
 import { IsString, IsNotEmpty } from 'class-validator';
 
 export class CreateZoneDto {
   @IsString()
   @IsNotEmpty()
   name: string;
-  // deliberately NO spaceId field — see note in service above
+  // Deliberately NO spaceId field — spaceId is always derived from the
+  // guarded request (req.spaceId), never trusted from the client payload.
+  // See ZonesService.create.
 }

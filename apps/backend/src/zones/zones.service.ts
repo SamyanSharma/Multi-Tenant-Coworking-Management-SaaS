@@ -1,10 +1,14 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 
 @Injectable()
 export class ZonesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   // Zone has spaceId directly on it (per ARCHITECTURE.md) — straightforward filter.
   findAllForSpace(spaceId: string) {
@@ -16,9 +20,9 @@ export class ZonesService {
     if (!zone) {
       throw new NotFoundException('Zone not found');
     }
-    // Zone exists, but does it belong to the CALLER's space?
-    // This check is what actually prevents cross-tenant reads —
-    // without it, any valid zone id from any space would be readable.
+    // Zone exists, but does it belong to the CALLER's space? This is what
+    // actually prevents cross-tenant reads — without it, any valid zone id
+    // from any space would be readable by anyone with a valid spaceId header.
     if (zone.spaceId !== spaceId) {
       throw new ForbiddenException('Zone does not belong to this space');
     }
@@ -26,9 +30,8 @@ export class ZonesService {
   }
 
   create(dto: CreateZoneDto, spaceId: string) {
-    // spaceId comes from the request (TenantGuard), NOT from the request body —
-    // never trust a client-supplied spaceId in the payload, or a Space_Manager
-    // could create a zone inside a DIFFERENT space by just changing the JSON.
+    // spaceId comes from the guarded request, NOT the request body — see
+    // note in CreateZoneDto.
     return this.prisma.zone.create({
       data: { ...dto, spaceId },
     });

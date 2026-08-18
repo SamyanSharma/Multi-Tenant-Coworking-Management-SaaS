@@ -131,15 +131,61 @@ export class StripeService {
   }
 
   /**
-   * TODO (not yet built — flagging rather than faking): Stripe Connect
-   * onboarding for a Space_Manager to link their bank account requires
-   * `stripe.accounts.create()` + `stripe.accountLinks.create()` to
-   * generate a hosted onboarding URL, then a webhook
-   * (`account.updated`) to detect when onboarding completes and persist
-   * `stripeAccountId` onto the User row. This is a real, separate flow
-   * with its own UI step in the frontend — out of scope for "build the
-   * fee-split + webhook logic" but load-bearing for the feature to work
-   * end-to-end. Worth its own small increment before Stage 8 if a real
-   * payment needs to be demoed, not just code-reviewed.
+   * Ensures a Stripe Connect account exists for this Space_Manager,
+   * creating one if needed, and returns its id. Idempotent: if
+   * `user.stripeAccountId` is already set, returns it directly rather
+   * than creating a duplicate account on every call.
+   *
+   * Uses Express accounts (Stripe-hosted onboarding UI, minimal
+   * platform-side compliance burden) — the right default for a capstone
+   * demo over Custom accounts, which require building your own
+   * onboarding UI and taking on more compliance responsibility.
    */
+  async createOrGetConnectAccount(user: {
+    id: string;
+    email: string;
+    stripeAccountId: string | null;
+  }): Promise<string> {
+    if (user.stripeAccountId) {
+      return user.stripeAccountId;
+    }
+
+    const account = await this.stripe.accounts.create({
+      type: 'express',
+      email: user.email,
+      // Lets the account.updated webhook find the right User row without
+      // a separate lookup table — same metadata pattern used for Booking
+      // in createBookingPaymentIntent.
+      metadata: { userId: user.id },
+    });
+
+    return account.id;
+  }
+
+  /**
+   * Generates a one-time-use hosted onboarding URL for a given Connect
+   * account. The Space_Manager is redirected here to enter their bank
+   * details; Stripe handles the entire compliance/KYC flow, and this
+   * platform never sees or stores raw banking info.
+   *
+   * refreshUrl: where Stripe sends the user if the link expires or they
+   * need to restart. returnUrl: where Stripe sends them after completing
+   * (or abandoning) the flow — completion itself is NOT confirmed by
+   * landing on returnUrl; that's only confirmed by the account.updated
+   * webhook (see webhook.controller.ts), since the user could close the
+   * tab mid-flow and still "return."
+   */
+  async createOnboardingLink(
+    accountId: string,
+    refreshUrl: string,
+    returnUrl: string,
+  ): Promise<string> {
+    const link = await this.stripe.accountLinks.create({
+      account: accountId,
+      refresh_url: refreshUrl,
+      return_url: returnUrl,
+      type: 'account_onboarding',
+    });
+    return link.url;
+  }
 }
