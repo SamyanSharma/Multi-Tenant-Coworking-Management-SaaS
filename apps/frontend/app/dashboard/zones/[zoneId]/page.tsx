@@ -7,27 +7,30 @@ import { getAuthHeaders } from '@/lib/api';
 import ZoneForm from './ZoneForm';
 import DeskForm from './DeskForm';
 import RoomForm from './RoomForm';
+import FloorPlan from '@/components/FloorPlan';
 
 interface Desk {
   id: string;
   name: string;
+  zoneId: string;
 }
 interface Room {
   id: string;
   name: string;
   capacity: number;
+  zoneId: string;
 }
 interface ZoneDetail {
   id: string;
   name: string;
-  desks: Desk[];
-  rooms: Room[];
 }
 
 export default function ZoneDetailPage() {
   const { zoneId } = useParams<{ zoneId: string }>();
   const role = useAuthStore((s) => s.role);
   const [zone, setZone] = useState<ZoneDetail | null>(null);
+  const [desks, setDesks] = useState<Desk[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -39,12 +42,31 @@ export default function ZoneDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/zones/${zoneId}`, {
-          headers: getAuthHeaders(),
-        });
-        if (!res.ok) throw new Error(`Failed to load zone (${res.status})`);
-        const data: ZoneDetail = await res.json();
-        setZone(data);
+        const base = process.env.NEXT_PUBLIC_API_URL;
+
+        // GET /zones/:id returns a bare zone object — {id, name, spaceId,
+        // ...} — with NO nested desks/rooms. GET /desks and GET /rooms
+        // are both space-wide (not filterable by zoneId server-side), so
+        // we fetch all of them for the space and filter client-side by
+        // zoneId. Not ideal at scale, but matches what the backend
+        // actually offers right now — no query-param filtering exists.
+        const [zoneRes, desksRes, roomsRes] = await Promise.all([
+          fetch(`${base}/zones/${zoneId}`, { headers: getAuthHeaders() }),
+          fetch(`${base}/desks`, { headers: getAuthHeaders() }),
+          fetch(`${base}/rooms`, { headers: getAuthHeaders() }),
+        ]);
+
+        if (!zoneRes.ok) throw new Error(`Failed to load zone (${zoneRes.status})`);
+        if (!desksRes.ok) throw new Error(`Failed to load desks (${desksRes.status})`);
+        if (!roomsRes.ok) throw new Error(`Failed to load rooms (${roomsRes.status})`);
+
+        const zoneData: ZoneDetail = await zoneRes.json();
+        const allDesks: Desk[] = await desksRes.json();
+        const allRooms: Room[] = await roomsRes.json();
+
+        setZone(zoneData);
+        setDesks(allDesks.filter((d) => d.zoneId === zoneId));
+        setRooms(allRooms.filter((r) => r.zoneId === zoneId));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -65,27 +87,7 @@ export default function ZoneDetailPage() {
     <div className="flex flex-col gap-6">
       <h1 className="text-xl font-semibold">{zone.name}</h1>
 
-      <section>
-        <h2 className="text-sm font-medium text-slate-500 mb-2">Desks</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {zone.desks.map((desk) => (
-            <div key={desk.id} className="border rounded p-3 bg-white shadow-sm">
-              {desk.name}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-sm font-medium text-slate-500 mb-2">Rooms</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {zone.rooms.map((room) => (
-            <div key={room.id} className="border rounded p-3 bg-white shadow-sm">
-              {room.name} <span className="text-xs text-slate-400">(cap {room.capacity})</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      <FloorPlan zoneId={zone.id} desks={desks} rooms={rooms} />
 
       {canManage && (
         <section className="flex flex-col gap-6 border-t pt-6 mt-2">
