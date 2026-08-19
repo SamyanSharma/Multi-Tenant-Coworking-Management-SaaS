@@ -1,25 +1,37 @@
 import { io, Socket } from 'socket.io-client';
+import type { Role } from '@/store/authStore';
 
 let socket: Socket | null = null;
 
-// Lazily creates a single shared socket connection, authenticated with
-// the current session token. Call this once (e.g. in a dashboard-level
-// useEffect) rather than per-component, so multiple pages don't open
-// duplicate connections.
+interface ConnectParams {
+  spaceId: string | null;
+  userRole: Role | null;
+  userId: string | null;
+}
+
+// Connects (or reuses) a single shared Socket.io connection for the
+// current dashboard session. Per the proposed Stage 5 contract
+// (Stage5_Socket_Event_Contract.md), identity is sent via the `auth`
+// handshake payload — the same three values REST sends as headers
+// (x-space-id, x-user-role, x-user-id) — since Socket.io's handshake
+// doesn't have a clean per-event header mechanism the way HTTP does.
 //
-// NOTE: no event listeners wired yet — ARCHITECTURE.md's Real-Time
-// Events table is still [TBD]. See Realtime_Events_Draft.md.
-//
-// NOT YET UPDATED to x-space-id/x-user-role — still uses token-based
-// auth. Confirm with Arpit whether the socket handshake uses the same
-// header pattern as REST before Stage 5 work starts.
-export function getSocket(token: string | null): Socket {
-  if (!socket) {
-    socket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:3001', {
-      auth: { token },
-      autoConnect: false,
-    });
-  }
+// Call connectSocket() once when the dashboard mounts, disconnectSocket()
+// on unmount. Don't call this per-page — one connection for the whole
+// dashboard session, matching PROGRESS.md's Stage 5 guidance.
+export function connectSocket({ spaceId, userRole, userId }: ConnectParams): Socket {
+  if (socket?.connected) return socket;
+
+  socket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:3000', {
+    auth: { spaceId, userRole, userId },
+    autoConnect: false,
+  });
+
+  socket.connect();
+  return socket;
+}
+
+export function getSocket(): Socket | null {
   return socket;
 }
 
