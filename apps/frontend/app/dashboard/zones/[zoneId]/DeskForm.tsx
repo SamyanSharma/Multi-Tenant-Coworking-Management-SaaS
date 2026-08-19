@@ -31,7 +31,6 @@ export default function DeskForm({ initialName = '', deskId, onSuccess }: DeskFo
           'Content-Type': 'application/json',
           ...getAuthHeaders(),
         },
-        // zoneId comes from the route, not a form field
         body: JSON.stringify({ name, zoneId }),
       });
 
