@@ -6,7 +6,7 @@ import { getAuthHeaders } from '@/lib/api';
 
 interface ZoneFormProps {
   initialName?: string;
-  zoneId?: string; // present when editing, absent when creating
+  zoneId?: string;
   onSuccess?: () => void;
 }
 
@@ -37,8 +37,12 @@ export default function ZoneForm({ initialName = '', zoneId, onSuccess }: ZoneFo
           'Content-Type': 'application/json',
           ...getAuthHeaders(),
         },
-        // spaceId comes from the authenticated session, never a form field
-        body: JSON.stringify({ name, spaceId }),
+        // spaceId is NOT sent in the body — CreateZoneDto only accepts
+        // `name`. The backend derives spaceId from the x-space-id header
+        // (see TenantGuard), and forbidNonWhitelisted:true means sending
+        // an extra `spaceId` field here would get the whole request
+        // rejected with a 400, not just ignored.
+        body: JSON.stringify({ name }),
       });
 
       if (!res.ok) {
