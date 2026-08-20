@@ -70,9 +70,6 @@ function SpaceManagerOnboarding() {
       });
       if (!res.ok) throw new Error(`Failed to start onboarding (${res.status})`);
       const { url } = await res.json();
-      // Stripe's onboarding flow lives on Stripe's own domain — a real
-      // redirect, not an in-app modal, since the account-creation form
-      // itself is Stripe's, not ours to render.
       window.location.href = url;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -138,10 +135,6 @@ function MemberCheckout() {
       }
 
       const { url } = await res.json();
-      // Redirect to Stripe Checkout's own hosted page — per the task
-      // brief's review note ("verify the Stripe checkout flow strictly
-      // uses test cards"), this is Stripe's real test-mode checkout UI,
-      // not a custom card form we'd build ourselves.
       window.location.href = url;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
