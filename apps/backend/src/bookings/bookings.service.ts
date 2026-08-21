@@ -129,14 +129,11 @@ export class BookingsService {
     } catch (err: unknown) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === PRISMA_UNIQUE_CONSTRAINT_VIOLATION
+        (err.code === PRISMA_UNIQUE_CONSTRAINT_VIOLATION ||
+          err.code === 'P2039')
       ) {
         throw new ForbiddenException(
-          'This slot is already booked (exact start-time conflict). ' +
-            'NOTE: the current unique constraint only catches EXACT ' +
-            'start-time collisions, not partial time-range overlaps — ' +
-            'see ARCHITECTURE.md Concurrency Strategy and the exclusion- ' +
-            'constraint migration for the stronger version.',
+          'This slot is already booked.',
         );
       }
       throw err;
