@@ -1,0 +1,9 @@
+# Copy this file to .env.local and adjust if your backend runs elsewhere.
+# .env.local is gitignored — this example is the one that gets committed.
+
+# Backend runs on port 3000 by default (see apps/backend/src/main.ts:
+# `process.env.PORT ?? 3000`). Frontend dev server runs on 3001 (see
+# apps/frontend/package.json's "dev" script), matching the backend's
+# CORS default (FRONTEND_URL ?? 'http://localhost:3001').
+NEXT_PUBLIC_API_URL=http://localhost:3000
+NEXT_PUBLIC_SOCKET_URL=http://localhost:3000
