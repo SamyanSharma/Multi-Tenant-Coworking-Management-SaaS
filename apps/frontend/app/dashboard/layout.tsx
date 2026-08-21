@@ -31,9 +31,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // One socket connection for the whole dashboard session, with the
   // booking_created/booking_cancelled listeners registered here rather
   // than per-component — this keeps liveBookingsStore up to date no
-  // matter which page is currently mounted (e.g. a booking made while
-  // you're on /dashboard/bookings still updates the floor plan's data,
-  // so it's correct the moment you navigate to it).
+  // matter which page is currently mounted.
   useEffect(() => {
     if (!role || !spaceId) return; // PLATFORM_ADMIN has no spaceId — no room to join yet
 
@@ -79,3 +77,4 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     </div>
   );
 }
+
