@@ -55,8 +55,11 @@ export const useBookingStore = create<BookingState>((set, get) => ({
       });
 
       if (!res.ok) {
-        // NOTE: assumed shape until Teammate A's real backend/exception
-        // filter is confirmed — see Frontend_Sync_Checklist.md.
+        // NOTE: real backend returns 403 (not 409) on the double-booking
+        // rejection — confirmed from bookings.service.ts. This still
+        // works correctly since it checks !res.ok generically and reads
+        // body.message regardless of status code, but don't branch on
+        // res.status === 409 anywhere without checking this first.
         const body = await res.json().catch(() => null);
         set({
           error: body?.message ?? 'Booking failed — that slot may already be taken.',
