@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getAuthHeaders } from '@/lib/api';
+import { useAuthStore } from '@/store/authStore';
 
 interface Space {
   id: string;
@@ -18,11 +19,21 @@ export default function SpacesPage() {
     async function fetchSpaces() {
       setLoading(true);
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/spaces`, {
+        const role = useAuthStore.getState().role;
+        const endpoint = role === 'PLATFORM_ADMIN' ? '/spaces' : '/spaces/me';
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${endpoint}`, {
           headers: getAuthHeaders(),
         });
-        const data: Space[] = await res.json();
-        setSpaces(data);
+        if (!res.ok) {
+          console.error('Failed to fetch spaces:', res.status, await res.text());
+          setSpaces([]);
+          return;
+        }
+        const data = await res.json();
+        setSpaces(Array.isArray(data) ? data : data ? [data] : []);
+      } catch (err) {
+        console.error('Network error fetching spaces:', err);
+        setSpaces([]);
       } finally {
         setLoading(false);
       }
