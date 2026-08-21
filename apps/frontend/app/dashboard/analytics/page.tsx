@@ -4,24 +4,17 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 
-// NOTE: no analytics/reporting code exists in the backend yet (confirmed
-// by reading apps/backend/src). This is a PROPOSED contract, same
-// situation as Stage 5's socket events and Stage 6's billing endpoints —
-// flag to Teammate A rather than assuming it's already correct.
+// NOTE: no backend analytics code is merged into main yet. This is a
+// PROPOSED contract — see /handoff-for-teammate-A/README.md.
 //
 // Proposed endpoint:
 //   GET /analytics/summary
 //   → {
-//       totalRevenue: number;      // cents, this space's Stripe payouts
-//       activeBookings: number;    // bookings with endTime in the future
-//       totalBookings: number;     // all-time count
-//       utilizationRate: number;   // 0-1, booked-resource-hours / total-available-hours
+//       totalRevenue: number;      // cents
+//       activeBookings: number;
+//       totalBookings: number;
+//       utilizationRate: number;   // 0-1
 //     }
-//   Scoped by the same x-space-id/x-user-role headers as everything
-//   else — SPACE_MANAGER sees their own space's numbers, PLATFORM_ADMIN
-//   presumably sees cross-tenant totals (exact scope TBD — flag to
-//   Teammate A, since RBAC doesn't currently grant PLATFORM_ADMIN any
-//   booking/revenue-adjacent routes at all).
 
 interface AnalyticsSummary {
   totalRevenue: number; // cents
@@ -93,4 +86,4 @@ export default function AnalyticsPage() {
       </div>
     </div>
   );
-} 
+}
