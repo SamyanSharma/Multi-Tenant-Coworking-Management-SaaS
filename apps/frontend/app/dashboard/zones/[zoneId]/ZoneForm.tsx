@@ -6,7 +6,7 @@ import { getAuthHeaders } from '@/lib/api';
 
 interface ZoneFormProps {
   initialName?: string;
-  zoneId?: string;
+  zoneId?: string; // present when editing, absent when creating
   onSuccess?: () => void;
 }
 
