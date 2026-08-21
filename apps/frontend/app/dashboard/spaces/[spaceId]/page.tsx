@@ -80,15 +80,20 @@ export default function SpaceDetailPage() {
     } else {
       setLoading(false);
       setError(
-        'This backend has no endpoint for viewing another space\'s ' +
-          'details — only your own. See PRD1.md\'s Target Users & Roles ' +
-          'for Platform_Admin\'s current (limited) access.'
+        "This backend has no endpoint for viewing another space's " +
+          "details — only your own. See PRD.md's Target Users & Roles " +
+          "for Platform_Admin's current (limited) access."
       );
     }
   }, [routeSpaceId, isOwnSpace]);
 
   if (loading) return <div>Loading space…</div>;
-  if (error) return <div className="text-amber-700 bg-amber-50 border border-amber-300 rounded p-3 text-sm">{error}</div>;
+  if (error)
+    return (
+      <div className="text-amber-700 bg-amber-50 border border-amber-300 rounded p-3 text-sm">
+        {error}
+      </div>
+    );
   if (!space) return <div>Space not found.</div>;
 
   return (
