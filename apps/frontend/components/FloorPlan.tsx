@@ -23,10 +23,9 @@ interface FloorPlanProps {
 }
 
 // "Currently booked" = any live booking on this resource whose time
-// range includes right now. This is intentionally simple (a real
-// calendar view of future/past slots is a bigger feature than "is this
-// desk taken right now") — matches the task brief's "Live updating
-// component" framing: instant visual feedback, not a full scheduler UI.
+// range includes right now. Intentionally simple — a full calendar view
+// of future/past slots is a bigger feature than "is this desk taken
+// right now," which is what a live floor plan needs to show.
 function isBookedNow(startTime: string, endTime: string): boolean {
   const now = Date.now();
   return new Date(startTime).getTime() <= now && new Date(endTime).getTime() >= now;
