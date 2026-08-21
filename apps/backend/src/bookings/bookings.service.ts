@@ -1,3 +1,4 @@
+import { BookingsGateway } from './bookings.gateway';
 import {
   Injectable,
   NotFoundException,
@@ -13,7 +14,11 @@ const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  // AFTER
+constructor(
+  private readonly prisma: PrismaService,
+  private readonly gateway: BookingsGateway,
+) {}
 
   /**
    * Resolves bookableId -> the actual Desk or Room, and confirms it
@@ -96,22 +101,18 @@ export class BookingsService {
       throw new BadRequestException('startTime must be before endTime');
     }
 
-    // Confirm the desk/room exists and belongs to this tenant BEFORE
-    // attempting the write — fails fast with a clear 404 instead of a
-    // confusing DB constraint error.
     await this.resolveBookable(bookableType, bookableId, spaceId);
 
     try {
-      // The transaction here is less about "multiple statements that must
-      // succeed together" (it's really just one insert) and more about
-      // giving Prisma/Postgres a clean boundary to surface the unique
-      // constraint violation as a catchable error rather than a raw
-      // unhandled DB exception.
-      return await this.prisma.$transaction(async (tx) => {
+      const booking = await this.prisma.$transaction(async (tx) => {
         return tx.booking.create({
           data: { bookableType, bookableId, userId, startTime, endTime },
         });
       });
+
+      this.gateway.emitBookingCreated(spaceId, booking);
+
+      return booking;
     } catch (err: unknown) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -128,4 +129,3 @@ export class BookingsService {
       throw err;
     }
   }
-}
