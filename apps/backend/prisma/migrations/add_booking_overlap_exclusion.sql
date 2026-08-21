@@ -22,3 +22,4 @@ EXCLUDE USING gist (
   "bookableId" WITH =,
   tsrange("startTime", "endTime") WITH &&
 );
+
