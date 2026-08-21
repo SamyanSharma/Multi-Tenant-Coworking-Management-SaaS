@@ -10,6 +10,8 @@ import { ZonesModule } from './zones/zones.module';
 import { DesksModule } from './desks/desks.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { BookingsModule } from './bookings/bookings.module';
+import { BillingModule } from './billing/billing.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { BookingsModule } from './bookings/bookings.module';
     DesksModule,
     RoomsModule,
     BookingsModule,
+    BillingModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [
