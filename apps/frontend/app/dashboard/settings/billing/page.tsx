@@ -4,18 +4,16 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 
-// NOTE: no backend payments code exists yet (confirmed by reading
-// apps/backend/src — no stripe/payments/billing module anywhere). Every
-// endpoint below is a PROPOSED contract, not a confirmed one — same
-// situation Stage 5's socket.ts was in before a gateway existed. Flag
-// these paths/shapes to Teammate A rather than assuming they're already
-// correct once he builds the payments module.
+// NOTE: no backend payments code is merged into main yet. Every endpoint
+// below is a PROPOSED contract — see
+// /handoff-for-teammate-A/README.md for the reference implementation
+// and what's still needed before these routes are real.
 //
 // Proposed endpoints:
 //   GET  /billing/status          → { onboarded: boolean, stripeAccountId: string | null }
-//   POST /billing/onboard         → { url: string }  (Stripe onboarding link to redirect to)
-//   POST /billing/checkout        → { url: string }  (Stripe Checkout session URL)
-//   body: { bookingId: string }   — Member pays for a specific booking
+//   POST /billing/onboard         → { url: string }
+//   POST /billing/checkout        → { url: string }
+//   body: { bookingId: string }
 
 interface BillingStatus {
   onboarded: boolean;
