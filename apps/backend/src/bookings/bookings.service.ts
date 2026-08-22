@@ -4,13 +4,18 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { BookableType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 
-// Prisma's unique-constraint-violation error code.
+// Prisma error codes
 const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
+const PRISMA_CONSTRAINT_VIOLATION = 'P2004';
+
+// Name of the PostgreSQL exclusion constraint created by the migration.
+const BOOKING_OVERLAP_CONSTRAINT = 'no_overlapping_bookings';
 
 @Injectable()
 export class BookingsService {
@@ -18,16 +23,14 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly gateway: BookingsGateway,
   ) {}
+
   /**
-   * Resolves bookableId -> the actual Desk or Room, and confirms it
-   * belongs to the caller's space. bookableId is NOT a real Prisma
-   * relation (per ARCHITECTURE.md's polymorphic Booking design), so this
-   * is the one place the "polymorphic + tenant isolation" logic lives,
-   * rather than duplicating it per method.
+   * Resolves bookableId -> the actual Desk or Room and confirms it
+   * belongs to the caller's space.
    *
-   * Returns NotFoundException (not Forbidden) for cross-tenant ids — this
-   * avoids confirming to a caller that a given id exists at all in a
-   * different tenant.
+   * Cross-tenant resources intentionally return NotFoundException
+   * rather than ForbiddenException so that the existence of another
+   * tenant's resource is not disclosed.
    */
   private async resolveBookable(
     bookableType: BookableType,
@@ -39,9 +42,11 @@ export class BookingsService {
         where: { id: bookableId },
         include: { zone: true },
       });
+
       if (!desk || desk.zone.spaceId !== spaceId) {
         throw new NotFoundException('Desk not found in this space');
       }
+
       return desk;
     }
 
@@ -50,81 +55,180 @@ export class BookingsService {
         where: { id: bookableId },
         include: { zone: true },
       });
+
       if (!room || room.zone.spaceId !== spaceId) {
         throw new NotFoundException('Room not found in this space');
       }
+
       return room;
     }
 
-    // Belt-and-suspenders: class-validator's @IsEnum already rejects
-    // anything outside BookableType before this method is reached, but
-    // bookableType still arrives as a plain string at runtime, so this
-    // isn't provably unreachable to the type checker.
-    throw new BadRequestException(`Unknown bookableType: ${bookableType}`);
+    throw new BadRequestException(
+      `Unknown bookableType: ${bookableType}`,
+    );
   }
 
   async findAllForSpace(spaceId: string) {
-    // Booking.bookableId is not a real FK (per ARCHITECTURE.md), so there's
-    // no single relation filter for "bookings in my space" — this is the
-    // direct cost of the polymorphic design. Resolve which Desk/Room ids
-    // belong to this space first, then filter Bookings against those id
-    // lists, branching on bookableType.
+    // Booking.bookableId is polymorphic and therefore is not a real FK.
+    // Resolve all Desk/Room IDs belonging to this tenant first.
     const [desks, rooms] = await Promise.all([
       this.prisma.desk.findMany({
-        where: { zone: { spaceId } },
-        select: { id: true },
+        where: {
+          zone: {
+            spaceId,
+          },
+        },
+        select: {
+          id: true,
+        },
       }),
+
       this.prisma.room.findMany({
-        where: { zone: { spaceId } },
-        select: { id: true },
+        where: {
+          zone: {
+            spaceId,
+          },
+        },
+        select: {
+          id: true,
+        },
       }),
     ]);
-    const deskIds = desks.map((d) => d.id);
-    const roomIds = rooms.map((r) => r.id);
+
+    const deskIds = desks.map((desk) => desk.id);
+    const roomIds = rooms.map((room) => room.id);
 
     return this.prisma.booking.findMany({
       where: {
         OR: [
-          { bookableType: BookableType.DESK, bookableId: { in: deskIds } },
-          { bookableType: BookableType.ROOM, bookableId: { in: roomIds } },
+          {
+            bookableType: BookableType.DESK,
+            bookableId: {
+              in: deskIds,
+            },
+          },
+          {
+            bookableType: BookableType.ROOM,
+            bookableId: {
+              in: roomIds,
+            },
+          },
         ],
       },
     });
   }
 
-  async create(dto: CreateBookingDto, spaceId: string, userId: string) {
-    const { bookableType, bookableId, startTime, endTime } = dto;
+  async create(
+    dto: CreateBookingDto,
+    spaceId: string,
+    userId: string,
+  ) {
+    const {
+      bookableType,
+      bookableId,
+      startTime,
+      endTime,
+    } = dto;
 
+    // Validate time range before touching the database.
     if (new Date(startTime) >= new Date(endTime)) {
-      throw new BadRequestException('startTime must be before endTime');
+      throw new BadRequestException(
+        'startTime must be before endTime',
+      );
     }
 
-    await this.resolveBookable(bookableType, bookableId, spaceId);
+    // Critical tenant-isolation check.
+    // This confirms that the requested Desk/Room belongs
+    // to the caller's current space.
+    await this.resolveBookable(
+      bookableType,
+      bookableId,
+      spaceId,
+    );
 
     try {
-      const booking = await this.prisma.$transaction(async (tx) => {
-        return tx.booking.create({
-          data: { bookableType, bookableId, userId, startTime, endTime },
-        });
-      });
+      const booking = await this.prisma.$transaction(
+        async (tx) => {
+          return tx.booking.create({
+            data: {
+              bookableType,
+              bookableId,
+              userId,
+              startTime,
+              endTime,
+            },
+          });
+        },
+      );
 
-      this.gateway.emitBookingCreated(spaceId, booking);
+      // Notify connected clients after successful creation.
+      this.gateway.emitBookingCreated(
+        spaceId,
+        booking,
+      );
 
       return booking;
     } catch (err: unknown) {
+      /**
+       * P2002
+       *
+       * Existing Prisma unique constraint.
+       * This catches exact duplicate start-time bookings.
+       */
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === PRISMA_UNIQUE_CONSTRAINT_VIOLATION
       ) {
-        throw new ForbiddenException(
-          'This slot is already booked (exact start-time conflict). ' +
-            'NOTE: the current unique constraint only catches EXACT ' +
-            'start-time collisions, not partial time-range overlaps — ' +
-            'see ARCHITECTURE.md Concurrency Strategy and the exclusion- ' +
-            'constraint migration for the stronger version.',
+        throw new ConflictException(
+          'This slot is already booked.',
         );
       }
+
+      /**
+       * P2004
+       *
+       * PostgreSQL exclusion constraint.
+       *
+       * The migration creates:
+       *
+       * no_overlapping_bookings
+       *
+       * which prevents overlapping time ranges for the same
+       * Desk/Room.
+       */
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === PRISMA_CONSTRAINT_VIOLATION &&
+        isOverlapExclusionViolation(err)
+      ) {
+        throw new ConflictException(
+          'This resource is already booked for the selected time range.',
+        );
+      }
+
+      // Preserve all unrelated database errors.
       throw err;
     }
   }
+}
+
+/**
+ * Checks whether a Prisma P2004 error came from the
+ * booking overlap exclusion constraint.
+ *
+ * Prisma's meta object can contain the database constraint
+ * name depending on the Prisma/database adapter version.
+ */
+function isOverlapExclusionViolation(
+  error: Prisma.PrismaClientKnownRequestError,
+): boolean {
+  const meta = error.meta as
+    | {
+        constraint?: string;
+      }
+    | undefined;
+
+  return (
+    meta?.constraint === BOOKING_OVERLAP_CONSTRAINT
+  );
 }
