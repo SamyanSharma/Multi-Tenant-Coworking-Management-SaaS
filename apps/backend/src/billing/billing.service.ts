@@ -53,12 +53,48 @@ export class BillingService {
     return { url: accountLink.url };
   }
 
+  // Resolves a booking's owning Space the same way bookings.service.ts's
+  // resolveBookable() resolves a Desk/Room's owning Space — Booking has no
+  // direct spaceId column (per ARCHITECTURE.md's polymorphic design), so
+  // this walks bookableId -> Desk/Room -> Zone -> Space. Throws 404 (not
+  // 403) for a cross-tenant booking id, matching the rest of the codebase's
+  // convention of not confirming another tenant's resource exists.
+  private async assertBookingInSpace(bookingId: string, spaceId: string) {
+    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    const owningZoneSpaceId =
+      booking.bookableType === 'DESK'
+        ? (await this.prisma.desk.findUnique({
+            where: { id: booking.bookableId },
+            include: { zone: true },
+          }))?.zone.spaceId
+        : (await this.prisma.room.findUnique({
+            where: { id: booking.bookableId },
+            include: { zone: true },
+          }))?.zone.spaceId;
+
+    if (owningZoneSpaceId !== spaceId) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    return booking;
+  }
+
   // 95/5 split per PRD.md. PLACEHOLDER: no `price` field exists on
   // Booking/Desk/Room yet — a real implementation needs a real price
   // source before this is more than a demo.
-  async createCheckoutSession(bookingId: string, spaceId: string) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
-    if (!booking) throw new NotFoundException('Booking not found');
+  async createCheckoutSession(bookingId: string, spaceId: string, callerUserId: string) {
+    const booking = await this.assertBookingInSpace(bookingId, spaceId);
+
+    // Ownership check: a MEMBER should only be able to pay for their own
+    // booking, not any booking in the space. TODO(Stage 2 auth): once real
+    // auth exists, callerUserId should come from the authenticated JWT
+    // rather than the x-user-id placeholder header — same caveat as
+    // BookingsController's create() endpoint.
+    if (booking.userId !== callerUserId) {
+      throw new BadRequestException('This booking does not belong to you');
+    }
 
     const space = await this.prisma.space.findUnique({ where: { id: spaceId } });
     if (!space?.stripeAccountId) {
