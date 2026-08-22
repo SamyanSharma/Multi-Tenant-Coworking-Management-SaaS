@@ -33,6 +33,7 @@
     "prisma": "^7.9.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "socket.io-client": "^4.8.1",
     "stripe": "^18.0.0"
   },
   "devDependencies": {
@@ -58,7 +59,6 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
-      
     "typescript-eslint": "^8.20.0"
   },
   "jest": {
