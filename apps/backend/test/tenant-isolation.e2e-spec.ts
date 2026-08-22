@@ -52,16 +52,22 @@ describe('Tenant isolation (e2e)', () => {
     await app.close();
   });
 
-  it("rejects a request for Space A's zone when scoped as Space B", async () => {
+it("rejects a request for Space A's zone when scoped as Space B", async () => {
     // This is the test that actually proves isolation works, not just
     // that CRUD works — if ZonesService.findOne's spaceId check ever
     // gets accidentally removed in a refactor, this is the test that
     // catches it (the others would still pass).
+    //
+    // Expects 404, not 403: a cross-tenant lookup must not let the caller
+    // distinguish "this zone doesn't exist" from "this zone exists but
+    // belongs to someone else" — see ARCHITECTURE.md's documented contract
+    // and the fix in zones.service.ts (previously returned 403 here,
+    // which leaked that distinction).
     await request(app.getHttpServer())
       .get(`/zones/${zoneInSpaceA.id}`)
       .set('x-space-id', spaceB.id)
       .set('x-user-role', 'SPACE_MANAGER')
-      .expect(403);
+      .expect(404);
   });
 
   it('allows the same request when correctly scoped as Space A', async () => {
