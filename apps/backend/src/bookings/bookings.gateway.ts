@@ -83,9 +83,3 @@ export class BookingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(spaceId).emit('booking_cancelled', { id: bookingId });
   }
 }
-  @Module({
-    controllers: [BookingsController],
-    providers: [BookingsService, BookingsGateway],
-  })
-  export class BookingsModule {}
-*/
