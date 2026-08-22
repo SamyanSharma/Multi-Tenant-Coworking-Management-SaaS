@@ -14,7 +14,6 @@ const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 
 @Injectable()
 export class BookingsService {
-  // AFTER
   constructor(
     private readonly prisma: PrismaService,
     private readonly gateway: BookingsGateway,
@@ -23,6 +22,7 @@ export class BookingsService {
    * Resolves bookableId -> the actual Desk or Room, and confirms it
    * belongs to the caller's space. bookableId is NOT a real Prisma
    * relation (per ARCHITECTURE.md's polymorphic Booking design), so this
+   * ...(rest of file unchanged)
    * is the one place the "polymorphic + tenant isolation" logic lives,
    * rather than duplicating it per method.
    *
