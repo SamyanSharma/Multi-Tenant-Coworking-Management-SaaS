@@ -22,7 +22,6 @@ export class BookingsService {
    * Resolves bookableId -> the actual Desk or Room, and confirms it
    * belongs to the caller's space. bookableId is NOT a real Prisma
    * relation (per ARCHITECTURE.md's polymorphic Booking design), so this
-   * ...(rest of file unchanged)
    * is the one place the "polymorphic + tenant isolation" logic lives,
    * rather than duplicating it per method.
    *
@@ -128,3 +127,4 @@ export class BookingsService {
       throw err;
     }
   }
+}
