@@ -1,14 +1,10 @@
-// REFERENCE STUB — written by Prakriti (frontend) as a starting point for
-// Arpit, matching the contract already documented in
-// Stage5_Socket_Event_Contract.md and what apps/frontend/lib/socket.ts
-// already sends on the `auth` handshake payload.
-//
-// NOT run or compiled — no network access to install @nestjs/websockets
-// or socket.io in the environment this was written in. Treat every line
-// here as needing your own verification, same as any other PR you'd
-// review, not as tested code.
-//
-// Requires: npm install @nestjs/websockets @nestjs/platform-socket.io
+// Originally drafted by Prakriti (frontend) as a starting point matching
+// the contract documented in Stage5_Socket_Event_Contract.md and what
+// apps/frontend/lib/socket.ts sends on the `auth` handshake payload — now
+// wired into bookings.module.ts and called from bookings.service.ts's
+// create(). Still needs a real boot + two-client test (see
+// MASTER_PROMPT.md's "clean build isn't sufficient verification" rule)
+// before being considered verified, same as any other endpoint.
 
 import {
   WebSocketGateway,
@@ -24,6 +20,12 @@ import { Logger } from '@nestjs/common';
 // guards and this gateway yet. Consider extracting to a shared function
 // if drift becomes a problem.
 const CUID_REGEX = /^c[a-z0-9]{20,}$/i;
+
+// Same three values RbacGuard checks against on the REST side (see
+// roles.decorator.ts / Role enum in @prisma/client) — kept as a literal
+// list here rather than importing the Prisma enum, since this file may be
+// compiled/reviewed before @prisma/client is generated in a fresh checkout.
+const VALID_ROLES = ['PLATFORM_ADMIN', 'SPACE_MANAGER', 'MEMBER'];
 
 interface SocketAuthPayload {
   spaceId?: string;
@@ -45,7 +47,7 @@ export class BookingsGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   handleConnection(client: Socket) {
     const auth = client.handshake.auth as SocketAuthPayload;
-    const { spaceId } = auth;
+    const { spaceId, userRole } = auth;
 
     if (!spaceId || !CUID_REGEX.test(spaceId)) {
       this.logger.warn(`Rejected socket connection: invalid spaceId "${spaceId}"`);
@@ -53,6 +55,18 @@ export class BookingsGateway implements OnGatewayConnection, OnGatewayDisconnect
       return;
     }
 
+    if (!userRole || !VALID_ROLES.includes(userRole)) {
+      this.logger.warn(`Rejected socket connection: invalid userRole "${userRole}"`);
+      client.disconnect(true);
+      return;
+    }
+
+    // NOTE: this confirms the role is *well-formed*, not that it's *true* —
+    // same placeholder-auth limitation as TenantGuard/RbacGuard on the REST
+    // side (see PROGRESS.md Open Questions). A client can still claim any
+    // role or any correctly-shaped spaceId until real JWT auth replaces the
+    // handshake payload. Not a regression introduced here, but flagged
+    // again since this is a second surface depending on the same gap.
     client.join(spaceId);
     this.logger.log(`Client ${client.id} joined space room ${spaceId}`);
   }
@@ -69,32 +83,6 @@ export class BookingsGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(spaceId).emit('booking_cancelled', { id: bookingId });
   }
 }
-
-/*
-INTEGRATION SNIPPET — how BookingsService.create() would call this.
-Not applied automatically since it changes an existing file you own;
-paste in manually after reviewing.
-
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly gateway: BookingsGateway, // add this
-  ) {}
-
-  async create(dto: CreateBookingDto, spaceId: string, userId: string) {
-    // ...existing logic unchanged...
-    const booking = await this.prisma.$transaction(async (tx) => {
-      return tx.booking.create({
-        data: { bookableType, bookableId, userId, startTime, endTime },
-      });
-    });
-
-    this.gateway.emitBookingCreated(spaceId, booking); // add this line
-
-    return booking;
-  }
-
-Also add BookingsGateway to bookings.module.ts's providers array:
-
   @Module({
     controllers: [BookingsController],
     providers: [BookingsService, BookingsGateway],
