@@ -27,6 +27,10 @@ export class BillingController {
   @UseGuards(RbacGuard)
   @Roles(Role.MEMBER)
   checkout(@Body() dto: CheckoutDto, @Req() req: Request) {
-    return this.billingService.createCheckoutSession(dto.bookingId, req.spaceId!);
+    // Same placeholder pattern as BookingsController.create() — see the
+    // TODO there. Replace this line, not the service's signature, once
+    // real auth lands.
+    const userId = req.headers['x-user-id'] as string;
+    return this.billingService.createCheckoutSession(dto.bookingId, req.spaceId!, userId);
   }
 }
