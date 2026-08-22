@@ -1,31 +1,50 @@
-// Must be the first import: prisma.config.ts loads .env for the Prisma
-// CLI (generate/migrate/studio) only — the running NestJS app needs its
-// own explicit load, or process.env.DATABASE_URL is undefined at runtime
-// (see PROGRESS.md's Stage 1-4 merge gotcha — this bug compiled clean and
-// only surfaced on a real DB write).
+// Must be the first import.
+// Loads variables from apps/backend/.env before NestJS/Prisma services
+// are initialized.
 import 'dotenv/config';
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  // rawBody: true preserves req.rawBody on every request (in addition to
-  // the normal parsed req.body) — required by
-  // payments/webhook.controller.ts, since Stripe signs the exact raw
-  // bytes of the request body and verification fails if only the
-  // JSON-parsed version is available.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
-  // whitelist: strips fields not declared on the DTO.
-  // forbidNonWhitelisted: rejects the request instead of silently
-  // dropping unexpected fields — a stray/malicious extra field in a
-  // request body gets caught loudly rather than ignored quietly.
-  app.enableCors({
-  origin: 'http://localhost:3001',
+  /*
+   * rawBody: true preserves req.rawBody on every request.
+   *
+   * Stripe signs the exact raw request bytes, so the webhook controller
+   * needs the raw body to verify Stripe's signature correctly.
+   */
+  const app = await NestFactory.create(AppModule, {
+    rawBody: true,
   });
 
+  /*
+   * Use FRONTEND_URL in deployment, while keeping localhost:3001
+   * as the local-development default.
+   */
+  app.enableCors({
+    origin:
+      process.env.FRONTEND_URL ?? 'http://localhost:3001',
+  });
+
+  /*
+   * whitelist:
+   * Removes properties that aren't declared by the DTO.
+   *
+   * forbidNonWhitelisted:
+   * Rejects requests containing unexpected properties instead of
+   * silently removing them.
+   */
   app.useGlobalPipes(
-    new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }),
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    }),
   );
-  await app.listen(process.env.PORT ?? 3000);
+
+  await app.listen(
+    process.env.PORT ?? 3000,
+  );
 }
+
 bootstrap();

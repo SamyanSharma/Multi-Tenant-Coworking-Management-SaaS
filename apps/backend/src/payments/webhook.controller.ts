@@ -23,15 +23,6 @@ export class WebhookController {
     private readonly prisma: PrismaService,
   ) {}
 
-  /**
-   * Stripe's servers call this directly — they will never send an
-   * x-space-id or x-user-role header, so this route MUST be exempt from
-   * the global TenantGuard/RbacGuard. Skipping those guards here is safe
-   * specifically BECAUSE Stripe signature verification (below) is a
-   * stronger authenticity check than either header ever was: it proves
-   * the request body was signed by Stripe's private key, not just that
-   * some caller sent a plausible-looking header.
-   */
   @SkipTenantCheck()
   @HttpCode(200)
   @Post('webhook')
@@ -42,40 +33,32 @@ export class WebhookController {
     if (!signature) {
       throw new BadRequestException('Missing stripe-signature header');
     }
+
     if (!req.rawBody) {
-      // This means main.ts's `rawBody: true` NestFactory option isn't
-      // active, or something upstream (a proxy, a different body parser)
-      // consumed the body first. Signature verification is IMPOSSIBLE
-      // without the exact raw bytes Stripe signed — failing loudly here
-      // is much better than silently trusting an unverified payload.
       throw new BadRequestException(
         'Raw request body unavailable — cannot verify webhook signature',
       );
     }
 
     let event: Stripe.Event;
+
     try {
       event = this.stripeService.constructWebhookEvent(
         req.rawBody,
         signature,
       );
     } catch (err: unknown) {
-      // A failed signature verification means either (a) this isn't
-      // really from Stripe, or (b) STRIPE_WEBHOOK_SECRET is misconfigured
-      // — both cases should reject the request, never process the
-      // payload anyway "just in case."
       const message = err instanceof Error ? err.message : 'unknown error';
-      this.logger.warn(`Webhook signature verification failed: ${message}`);
+
+      this.logger.warn(
+        `Webhook signature verification failed: ${message}`,
+      );
+
       throw new BadRequestException(
         `Webhook signature verification failed: ${message}`,
       );
     }
 
-    // Only handling the one event type actually needed for Stage 6's
-    // scope (confirming a booking payment succeeded). Stripe sends many
-    // other event types to any registered webhook endpoint; explicitly
-    // ignoring the rest (rather than a catch-all handler) makes it clear
-    // exactly what this system currently reacts to.
     switch (event.type) {
       case 'payment_intent.succeeded': {
         const paymentIntent = event.data.object as Stripe.PaymentIntent;
@@ -96,6 +79,7 @@ export class WebhookController {
             stripePaymentIntentId: paymentIntent.id,
           },
         });
+
         this.logger.log(`Booking ${bookingId} marked PAID`);
         break;
       }
@@ -103,17 +87,24 @@ export class WebhookController {
       case 'payment_intent.payment_failed': {
         const paymentIntent = event.data.object as Stripe.PaymentIntent;
         const bookingId = paymentIntent.metadata?.bookingId;
+
         if (bookingId) {
           await this.prisma.booking.update({
             where: { id: bookingId },
-            data: { paymentStatus: 'FAILED' },
+            data: {
+              paymentStatus: 'FAILED',
+            },
           });
+
+          this.logger.log(`Booking ${bookingId} marked FAILED`);
         }
+
         break;
       }
 
       case 'account.updated': {
         const account = event.data.object as Stripe.Account;
+
         const userId = account.metadata?.userId;
 
         if (!userId) {
@@ -123,34 +114,97 @@ export class WebhookController {
           break;
         }
 
-        // Onboarding is "complete" specifically when Stripe confirms the
-        // account can both receive charges and has submitted all
-        // required KYC details — checking only one of the two would let
-        // a partially-onboarded account be treated as ready, and a
-        // transfer to it would then fail at charge time instead of here.
-        const isComplete = Boolean(
-          account.charges_enabled && account.details_submitted,
+        /*
+         * Stripe Accounts v2 compatibility:
+         *
+         * This project creates Connect accounts using Stripe's newer
+         * Accounts v2 API. The older Account object fields
+         * `charges_enabled` and `details_submitted` are not sufficient
+         * for determining onboarding completion for this account type.
+         *
+         * We therefore inspect the account requirements reported by the
+         * webhook when available.
+         */
+
+        const accountData = account as Stripe.Account & {
+          requirements?: {
+            currently_due?: string[] | null;
+            past_due?: string[] | null;
+            disabled_reason?: string | null;
+          } | null;
+
+          applied_configurations?: string[] | null;
+
+          capabilities?: {
+            card_payments?: string;
+          };
+        };
+
+        const currentlyDue =
+          accountData.requirements?.currently_due ?? [];
+
+        const pastDue =
+          accountData.requirements?.past_due ?? [];
+
+        const disabledReason =
+          accountData.requirements?.disabled_reason ?? null;
+
+        /*
+         * For the v2 account we created, Stripe's direct API response
+         * reports:
+         *
+         *   applied_configurations: ["merchant"]
+         *   requirements: null
+         *
+         * When requirements are null, Stripe has no outstanding
+         * requirements to report for the account.
+         *
+         * We also retain the traditional Accounts v1 check for
+         * compatibility with webhook payloads that still contain those
+         * fields.
+         */
+
+        const traditionalAccountComplete = Boolean(
+          account.charges_enabled &&
+            account.details_submitted,
         );
+
+        const v2AccountComplete =
+          Array.isArray(accountData.applied_configurations) &&
+          accountData.applied_configurations.includes('merchant') &&
+          currentlyDue.length === 0 &&
+          pastDue.length === 0 &&
+          disabledReason === null;
+
+        const isComplete =
+          traditionalAccountComplete || v2AccountComplete;
 
         await this.prisma.user.update({
           where: { id: userId },
-          data: { stripeOnboardingComplete: isComplete },
+          data: {
+            stripeOnboardingComplete: isComplete,
+          },
         });
+
         this.logger.log(
-          `User ${userId} stripeOnboardingComplete=${isComplete}`,
+          `User ${userId} stripeOnboardingComplete=${isComplete} ` +
+            `currentlyDue=${currentlyDue.length} ` +
+            `pastDue=${pastDue.length} ` +
+            `disabledReason=${disabledReason ?? 'none'} ` +
+            `appliedConfigurations=${
+              accountData.applied_configurations?.join(',') ?? 'none'
+            }`,
         );
+
         break;
       }
 
       default:
-        // Deliberately silent for event types this system doesn't act
-        // on yet — still returns 200 below so Stripe doesn't retry.
-        this.logger.debug(`Ignoring unhandled event type: ${event.type}`);
+        this.logger.debug(
+          `Ignoring unhandled event type: ${event.type}`,
+        );
     }
 
-    // Stripe expects a fast 2xx to acknowledge receipt; it retries with
-    // backoff on anything else, which would otherwise cause duplicate
-    // processing if this handler is slow rather than actually failing.
     return { received: true };
   }
 }

@@ -36,6 +36,7 @@ model Space {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  priceCents Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -96,11 +97,9 @@ model Booking {
   endTime      DateTime
   createdAt    DateTime     @default(now())
 
-  // Stage 6 additions — payment tracking. amountCents is set at booking
-  // creation time (Stage 6's payments flow reads the desk/room's price;
-  // NOTE: no price field exists on Desk/Room yet either — this MVP
-  // currently expects amountCents to be passed by the client/frontend
-  // until a real pricing model is designed. Flagged, not silently assumed.
+  // Stage 6: snapshot the Space's flat booking price at booking creation.
+  // Keeping the amount on Booking means later Space price changes do not
+  // alter the historical amount of an existing booking.
   paymentStatus         PaymentStatus @default(UNPAID)
   amountCents           Int?
   stripePaymentIntentId String?       @unique

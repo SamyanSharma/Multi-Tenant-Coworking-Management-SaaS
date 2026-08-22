@@ -21,57 +21,102 @@ export class PaymentsController {
 
   /**
    * Starts (or resumes) Stripe Connect onboarding for the calling
-   * Space_Manager, returning a hosted onboarding URL the frontend should
-   * redirect the user to. Only SPACE_MANAGER — a Member or Platform_Admin
-   * has no reason to link a payout account.
+   * Space_Manager.
    *
-   * NOTE: `userId` is read from a placeholder `x-user-id` header here,
-   * same interim pattern as BookingsController — see that file's TODO
-   * comment about replacing this with auth-derived identity once real
-   * JWT auth exists. Both should be updated together.
+   * The current project still uses x-user-id as a placeholder for
+   * authenticated identity until JWT auth is implemented.
+   *
+   * IMPORTANT:
+   * The user lookup is scoped to req.spaceId as well as userId.
+   * This prevents a Space_Manager from one tenant from supplying
+   * another tenant's user id and creating/linking a Stripe account
+   * for that user.
    */
   @Roles(Role.SPACE_MANAGER)
   @Post('onboard')
   async onboard(@Req() req: Request) {
-    const userId = req.headers['x-user-id'] as string;
+    const userId = req.headers['x-user-id'] as string | undefined;
+    const spaceId = req.spaceId;
+
     if (!userId) {
       throw new BadRequestException('Missing x-user-id header');
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new BadRequestException('User not found');
+    if (!spaceId) {
+      throw new BadRequestException('Missing spaceId');
     }
 
-    const accountId = await this.stripeService.createOrGetConnectAccount({
-      id: user.id,
-      email: user.email,
-      stripeAccountId: user.stripeAccountId,
+    /*
+     * Tenant-scoped lookup:
+     *
+     * A valid userId by itself is NOT enough.
+     * The user must:
+     *   1. have the supplied userId,
+     *   2. belong to this request's space, and
+     *   3. actually be a SPACE_MANAGER.
+     *
+     * This prevents cross-tenant Stripe account linkage.
+     */
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        spaceId,
+        role: Role.SPACE_MANAGER,
+      },
     });
 
-    // Persist immediately on first creation — an account existing is not
-    // the same as onboarding being complete (see
-    // User.stripeOnboardingComplete's comment in schema.prisma), but we
-    // still want the id saved right away so createOrGetConnectAccount is
-    // truly idempotent on the next call.
+    if (!user) {
+      throw new BadRequestException(
+        'Space Manager not found in this space',
+      );
+    }
+
+    /*
+     * Reuse an existing Stripe Connect account when one is already
+     * stored; otherwise create a new Express Connect account.
+     */
+    const accountId =
+      await this.stripeService.createOrGetConnectAccount({
+        id: user.id,
+        email: user.email,
+        stripeAccountId: user.stripeAccountId,
+      });
+
+    /*
+     * Persist the Stripe account id immediately when this is the
+     * first onboarding attempt.
+     *
+     * Having a Stripe account is NOT the same as completing
+     * Stripe onboarding. Completion is confirmed separately by
+     * the account.updated webhook.
+     */
     if (!user.stripeAccountId) {
       await this.prisma.user.update({
-        where: { id: userId },
-        data: { stripeAccountId: accountId },
+        where: { id: user.id },
+        data: {
+          stripeAccountId: accountId,
+        },
       });
     }
 
-    // Frontend URLs — hardcoded to localhost for now since there's no
-    // deployed frontend origin configured anywhere yet (see PROGRESS.md's
-    // hosting-choice open question). Move to an env var once that's
-    // decided, same as the Socket.io gateway's CORS origin TODO.
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3001';
-    const onboardingUrl = await this.stripeService.createOnboardingLink(
-      accountId,
-      `${frontendUrl}/dashboard/payments/onboard/refresh`,
-      `${frontendUrl}/dashboard/payments/onboard/complete`,
-    );
+    /*
+     * Stripe Account Links are one-time-use URLs.
+     *
+     * FRONTEND_URL can be configured for deployment while keeping
+     * localhost:3001 as the local-development default.
+     */
+    const frontendUrl =
+      process.env.FRONTEND_URL ?? 'http://localhost:3001';
 
-    return { url: onboardingUrl };
+    const onboardingUrl =
+      await this.stripeService.createOnboardingLink(
+        accountId,
+        `${frontendUrl}/dashboard/payments/onboard/refresh`,
+        `${frontendUrl}/dashboard/payments/onboard/complete`,
+      );
+
+    return {
+      url: onboardingUrl,
+    };
   }
 }

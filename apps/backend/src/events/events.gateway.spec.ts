@@ -7,69 +7,164 @@ describe('EventsGateway', () => {
     gateway = new EventsGateway();
   });
 
-  function mockSocket(spaceId?: string) {
+  function mockSocket(
+    spaceId?: string,
+    role?: string,
+  ): any {
     return {
       id: 'socket-1',
-      handshake: { auth: spaceId ? { spaceId } : {} },
+      handshake: {
+        auth: {
+          spaceId,
+          role,
+        },
+      },
       join: jest.fn(),
       emit: jest.fn(),
       disconnect: jest.fn(),
-    } as any;
+    };
   }
 
-  it('joins the correct spaceId-scoped room on connection', () => {
-    const client = mockSocket('cku8x2vwn0000abcd1234efgh');
+  it('joins the correct spaceId-scoped room for a valid MEMBER', () => {
+    const client = mockSocket(
+      'cku8x2vwn0000abcd1234efgh',
+      'MEMBER',
+    );
+
     gateway.handleConnection(client);
-    expect(client.join).toHaveBeenCalledWith('space:cku8x2vwn0000abcd1234efgh');
+
+    expect(client.join).toHaveBeenCalledWith(
+      'space:cku8x2vwn0000abcd1234efgh',
+    );
+
     expect(client.disconnect).not.toHaveBeenCalled();
   });
 
-  it('rejects and disconnects a socket with no spaceId in handshake.auth', () => {
-    const client = mockSocket(undefined);
+  it('joins the correct spaceId-scoped room for a valid SPACE_MANAGER', () => {
+    const client = mockSocket(
+      'cku8x2vwn0000abcd1234efgh',
+      'SPACE_MANAGER',
+    );
+
     gateway.handleConnection(client);
-    expect(client.join).not.toHaveBeenCalled();
+
+    expect(client.join).toHaveBeenCalledWith(
+      'space:cku8x2vwn0000abcd1234efgh',
+    );
+
+    expect(client.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('rejects a socket with no spaceId', () => {
+    const client = mockSocket(
+      undefined,
+      'MEMBER',
+    );
+
+    gateway.handleConnection(client);
+
     expect(client.emit).toHaveBeenCalledWith(
       'connection_error',
-      expect.any(Object),
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'Missing or invalid',
+        ),
+      }),
     );
-    expect(client.disconnect).toHaveBeenCalledWith(true);
-  });
 
-  it('rejects a socket with a malformed spaceId', () => {
-    const client = mockSocket('not-a-real-cuid');
-    gateway.handleConnection(client);
+    expect(client.disconnect).toHaveBeenCalledWith(true);
     expect(client.join).not.toHaveBeenCalled();
+  });
+
+  it('rejects a socket with no role', () => {
+    const client = mockSocket(
+      'cku8x2vwn0000abcd1234efgh',
+      undefined,
+    );
+
+    gateway.handleConnection(client);
+
+    expect(client.emit).toHaveBeenCalledWith(
+      'connection_error',
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'Missing or invalid',
+        ),
+      }),
+    );
+
     expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.join).not.toHaveBeenCalled();
   });
 
-  it('emitBookingCreated broadcasts ONLY to the matching space room, not globally', () => {
-    const emit = jest.fn();
-    const to = jest.fn(() => ({ emit }));
-    gateway.server = { to } as any;
+  it('rejects an invalid role', () => {
+    const client = mockSocket(
+      'cku8x2vwn0000abcd1234efgh',
+      'PLATFORM_ADMIN',
+    );
 
-    const spaceIdA = 'cku8x2vwn0000abcd1234efgh';
-    const payload = { id: 'booking-1' };
-    gateway.emitBookingCreated(spaceIdA, payload);
+    gateway.handleConnection(client);
 
-    // The key assertion: .to() was called with SPACE A's room specifically
-    // — not server.emit() (which would broadcast to every connected
-    // client regardless of space), and not some other space's room.
-    expect(to).toHaveBeenCalledWith(`space:${spaceIdA}`);
-    expect(to).not.toHaveBeenCalledWith(expect.stringContaining('space:other'));
-    expect(emit).toHaveBeenCalledWith('booking_created', payload);
+    expect(client.emit).toHaveBeenCalledWith(
+      'connection_error',
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'Missing or invalid',
+        ),
+      }),
+    );
+
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.join).not.toHaveBeenCalled();
   });
 
-  it('two different spaces get routed to two different rooms', () => {
+  it('rejects an invalid spaceId', () => {
+    const client = mockSocket(
+      'not-a-valid-space-id',
+      'MEMBER',
+    );
+
+    gateway.handleConnection(client);
+
+    expect(client.emit).toHaveBeenCalledWith(
+      'connection_error',
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'Missing or invalid',
+        ),
+      }),
+    );
+
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.join).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts booking_created only to the requested space room', () => {
     const emit = jest.fn();
-    const to = jest.fn(() => ({ emit }));
-    gateway.server = { to } as any;
 
-    const spaceA = 'cku8x2vwn0000aaaaaaaaaaaa';
-    const spaceB = 'cku8x2vwn0000bbbbbbbbbbbb';
-    gateway.emitBookingCreated(spaceA, { id: 'b1' });
-    gateway.emitBookingCreated(spaceB, { id: 'b2' });
+    (gateway as any).server = {
+      to: jest.fn().mockReturnValue({
+        emit,
+      }),
+    };
 
-    expect(to).toHaveBeenNthCalledWith(1, `space:${spaceA}`);
-    expect(to).toHaveBeenNthCalledWith(2, `space:${spaceB}`);
+    const payload = {
+      id: 'booking-1',
+      bookableType: 'DESK',
+    };
+
+    gateway.emitBookingCreated(
+      'cku8x2vwn0000abcd1234efgh',
+      payload,
+    );
+
+    expect((gateway as any).server.to).toHaveBeenCalledWith(
+      'space:cku8x2vwn0000abcd1234efgh',
+    );
+
+    expect(emit).toHaveBeenCalledWith(
+      'booking_created',
+      payload,
+    );
   });
 });

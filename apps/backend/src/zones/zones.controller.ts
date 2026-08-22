@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Req,
@@ -17,8 +18,7 @@ import { Roles, Role } from '../auth/roles.decorator';
 export class ZonesController {
   constructor(private readonly zonesService: ZonesService) {}
 
-  // Space_Manager AND Member can both view zones — Members need to see
-  // zones to know where they can book a desk/room.
+  // Space_Manager AND Member can view zones in their own space.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
@@ -29,16 +29,40 @@ export class ZonesController {
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get(':id')
-  findOne(@Param('id') id: string, @Req() req: Request) {
+  findOne(
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
     return this.zonesService.findOne(id, req.spaceId!);
   }
 
-  // Only Space_Manager can create zones — "Manage own space's zones/desks"
-  // in ARCHITECTURE.md's RBAC table.
+  // Only Space_Manager can create zones.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post()
-  create(@Body() dto: CreateZoneDto, @Req() req: Request) {
-    return this.zonesService.create(dto, req.spaceId!);
+  create(
+    @Body() dto: CreateZoneDto,
+    @Req() req: Request,
+  ) {
+    return this.zonesService.create(
+      dto,
+      req.spaceId!,
+    );
+  }
+
+  // Only Space_Manager can edit zones.
+  @UseGuards(RbacGuard)
+  @Roles(Role.SPACE_MANAGER)
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body() dto: CreateZoneDto,
+    @Req() req: Request,
+  ) {
+    return this.zonesService.update(
+      id,
+      dto,
+      req.spaceId!,
+    );
   }
 }
