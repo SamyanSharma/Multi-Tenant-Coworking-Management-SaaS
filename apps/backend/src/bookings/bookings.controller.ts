@@ -4,6 +4,7 @@ import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
+import { getCallerUserId } from '../auth/caller.util';
 
 @Controller('bookings')
 export class BookingsController {
@@ -15,6 +16,16 @@ export class BookingsController {
   findAll(@Req() req: Request) {
     return this.bookingsService.findAllForSpace(req.spaceId!);
   }
+
+  // RBAC table: "Book a desk/room" -> Member only.
+  @UseGuards(RbacGuard)
+  @Roles(Role.MEMBER)
+  @Post()
+  create(@Body() dto: CreateBookingDto, @Req() req: Request) {
+    const userId = getCallerUserId(req);
+    return this.bookingsService.create(dto, req.spaceId!, userId);
+  }
+}
 
   // RBAC table: "Book a desk/room" -> Member only.
   @UseGuards(RbacGuard)
