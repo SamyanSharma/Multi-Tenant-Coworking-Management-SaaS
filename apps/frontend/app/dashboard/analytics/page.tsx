@@ -4,9 +4,6 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 
-// NOTE: no backend analytics code is merged into main yet. This is a
-// PROPOSED contract — see /handoff-for-teammate-A/README.md.
-//
 // Backend contract (implemented in apps/backend/src/analytics/):
 //   GET /analytics/summary
 //   → {
