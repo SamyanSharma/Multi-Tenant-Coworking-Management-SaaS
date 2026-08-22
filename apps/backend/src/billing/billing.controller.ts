@@ -4,6 +4,7 @@ import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { BillingService } from './billing.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { getCallerUserId } from '../auth/caller.util';
 
 @Controller('billing')
 export class BillingController {
@@ -27,10 +28,7 @@ export class BillingController {
   @UseGuards(RbacGuard)
   @Roles(Role.MEMBER)
   checkout(@Body() dto: CheckoutDto, @Req() req: Request) {
-    // Same placeholder pattern as BookingsController.create() — see the
-    // TODO there. Replace this line, not the service's signature, once
-    // real auth lands.
-    const userId = req.headers['x-user-id'] as string;
+    const userId = getCallerUserId(req);
     return this.billingService.createCheckoutSession(dto.bookingId, req.spaceId!, userId);
   }
 }
