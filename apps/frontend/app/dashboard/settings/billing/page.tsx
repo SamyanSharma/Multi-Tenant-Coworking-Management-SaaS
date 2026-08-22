@@ -4,11 +4,6 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 
-// NOTE: no backend payments code is merged into main yet. Every endpoint
-// below is a PROPOSED contract — see
-// /handoff-for-teammate-A/README.md for the reference implementation
-// and what's still needed before these routes are real.
-//
 // Backend contract (implemented in apps/backend/src/billing/):
 //   GET  /billing/status          → { onboarded: boolean, stripeAccountId: string | null }
 //   POST /billing/onboard         → { url: string }
