@@ -69,12 +69,16 @@ model Room {
   @@index([zoneId])
 }
 
-// Polymorphic booking: bookableId is NOT a formal FK (per ARCHITECTURE.md).
+// Polymorphic booking: bookableId is NOT a formal FK.
 // App code resolves bookableId against Desk or Room based on bookableType.
-// @@unique below is the Stage 4 "simple" concurrency guard — see
-// prisma/migrations/*_add_booking_overlap_exclusion for the stronger
-// range-overlap version discussed alongside it, which is NOT applied by
-// default (team decision pending — see PR description / ARCHITECTURE.md).
+//
+// The @@unique constraint prevents duplicate bookings with the same
+// resource and start time.
+//
+// The stronger PostgreSQL EXCLUDE constraint
+// "no_overlapping_bookings" is defined in the
+// 20260820000000_add_booking_constraints migration and prevents
+// overlapping time ranges for the same Desk/Room.
 model Booking {
   id           String       @id @default(cuid())
   bookableType BookableType
