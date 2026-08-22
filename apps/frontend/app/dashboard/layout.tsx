@@ -18,7 +18,12 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Bookings', href: '/dashboard/bookings', roles: ['MEMBER', 'SPACE_MANAGER'] },
   { label: 'Manage Zones', href: '/dashboard/zones', roles: ['SPACE_MANAGER'] },
   { label: 'Billing', href: '/dashboard/settings/billing', roles: ['SPACE_MANAGER', 'MEMBER'] },
-  { label: 'Analytics', href: '/dashboard/analytics', roles: ['SPACE_MANAGER', 'PLATFORM_ADMIN'] },
+    // PLATFORM_ADMIN intentionally excluded: analytics.controller.ts only
+  // grants SPACE_MANAGER (per-space summary). Cross-tenant analytics for
+  // PLATFORM_ADMIN is an open product question (see PRD.md) with no route
+  // behind it yet — showing the link would just 403. Add PLATFORM_ADMIN
+  // back here once/if that route exists.
+  { label: 'Analytics', href: '/dashboard/analytics', roles: ['SPACE_MANAGER'] }
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
