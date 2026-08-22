@@ -7,7 +7,7 @@ import { getAuthHeaders } from '@/lib/api';
 // NOTE: no backend analytics code is merged into main yet. This is a
 // PROPOSED contract — see /handoff-for-teammate-A/README.md.
 //
-// Proposed endpoint:
+// Backend contract (implemented in apps/backend/src/analytics/):
 //   GET /analytics/summary
 //   → {
 //       totalRevenue: number;      // cents
