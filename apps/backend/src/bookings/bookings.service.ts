@@ -15,11 +15,10 @@ const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 @Injectable()
 export class BookingsService {
   // AFTER
-constructor(
-  private readonly prisma: PrismaService,
-  private readonly gateway: BookingsGateway,
-) {}
-
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: BookingsGateway,
+  ) {}
   /**
    * Resolves bookableId -> the actual Desk or Room, and confirms it
    * belongs to the caller's space. bookableId is NOT a real Prisma
