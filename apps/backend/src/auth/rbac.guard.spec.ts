@@ -54,6 +54,6 @@ describe('RbacGuard', () => {
     } as unknown as ExecutionContext;
 
     expect(guard.canActivate(ctx)).toBe(true);
-    expect(request['userRole']).toBe(Role.MEMBER);
+    expect((request as any).userRole).toBe(Role.MEMBER);
   });
 });

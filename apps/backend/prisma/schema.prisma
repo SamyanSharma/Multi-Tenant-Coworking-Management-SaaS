@@ -20,10 +20,23 @@ enum BookableType {
   ROOM
 }
 
+// Stage 6: tracks a booking's Stripe payment lifecycle. Deliberately kept
+// on Booking rather than a separate Payment model — a booking has exactly
+// one payment attempt in this MVP's scope (no partial payments, no
+// multiple attempts modeled), so a separate table would be normalization
+// without payoff at this scale. Revisit if that assumption changes.
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  FAILED
+}
+
 model Space {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  priceCents Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -84,6 +97,13 @@ model Booking {
   endTime      DateTime
   createdAt    DateTime     @default(now())
 
+  // Stage 6: snapshot the Space's flat booking price at booking creation.
+  // Keeping the amount on Booking means later Space price changes do not
+  // alter the historical amount of an existing booking.
+  paymentStatus         PaymentStatus @default(UNPAID)
+  amountCents           Int?
+  stripePaymentIntentId String?       @unique
+
   @@unique([bookableType, bookableId, startTime])
   @@index([bookableType, bookableId])
   @@index([userId])
@@ -100,6 +120,19 @@ model User {
   space     Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  // Stage 6: only meaningful for SPACE_MANAGER — the Stripe Connect
+  // account that receives the 95% split for bookings in their space.
+  // Null until they start Connect onboarding (see StripeService's
+  // createOrGetConnectAccount).
+  stripeAccountId String?
+  // Separate from stripeAccountId's presence: an account can exist
+  // (stripeAccountId set) but still be mid-onboarding and unable to
+  // receive transfers. This flips true only once Stripe's
+  // `account.updated` webhook confirms charges_enabled + details_submitted
+  // — see webhook.controller.ts. Added this session alongside the
+  // onboarding flow itself; flagged as a real schema change, not silent.
+  stripeOnboardingComplete Boolean @default(false)
 
   bookings Booking[]
 

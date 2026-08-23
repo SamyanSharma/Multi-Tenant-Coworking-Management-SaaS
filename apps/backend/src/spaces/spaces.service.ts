@@ -15,14 +15,31 @@ export class SpacesService {
   // guarded request says they belong to. Space is the tenant boundary
   // itself, so this is a direct lookup by id, not a spaceId filter.
   async findOwnSpace(spaceId: string) {
-    const space = await this.prisma.space.findUnique({
-      where: { id: spaceId },
-    });
-    if (!space) {
-      throw new NotFoundException('Space not found');
-    }
-    return space;
+  const space = await this.prisma.space.findUnique({
+    where: { id: spaceId },
+  });
+
+  if (!space) {
+    throw new NotFoundException('Space not found');
   }
+
+  return space;
+}
+
+async updatePrice(spaceId: string, priceCents: number) {
+  const space = await this.prisma.space.findUnique({
+    where: { id: spaceId },
+  });
+
+  if (!space) {
+    throw new NotFoundException('Space not found');
+  }
+
+  return this.prisma.space.update({
+    where: { id: spaceId },
+    data: { priceCents },
+  });
+}
 
   create(dto: CreateSpaceDto) {
     return this.prisma.space.create({ data: dto });
