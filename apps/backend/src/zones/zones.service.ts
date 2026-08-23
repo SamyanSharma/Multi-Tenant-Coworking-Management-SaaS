@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 
@@ -25,14 +21,13 @@ export class ZonesService {
       },
     });
 
-    if (!zone) {
-      throw new NotFoundException('Zone not found');
-    }
-
-    if (zone.spaceId !== spaceId) {
-      throw new ForbiddenException(
-        'Zone does not belong to this space',
-      );
+    // 404 for BOTH "doesn't exist" and "exists in a different tenant" —
+    // matching ARCHITECTURE.md's documented contract ("Cross-tenant lookup
+    // returns 404, not 403") and the same pattern used in
+    // desks.service.ts/rooms.service.ts. A caller must not be able to
+    // distinguish "no such zone" from "that zone belongs to someone else."
+    if (!zone || zone.spaceId !== spaceId) {
+      throw new NotFoundException('Zone not found in this space');
     }
 
     return zone;
@@ -56,14 +51,9 @@ export class ZonesService {
       where: { id },
     });
 
-    if (!zone) {
-      throw new NotFoundException('Zone not found');
-    }
-
-    if (zone.spaceId !== spaceId) {
-      throw new ForbiddenException(
-        'Zone does not belong to this space',
-      );
+    // Same 404-for-both contract as findOne above — see comment there.
+    if (!zone || zone.spaceId !== spaceId) {
+      throw new NotFoundException('Zone not found in this space');
     }
 
     return this.prisma.zone.update({

@@ -248,6 +248,40 @@ export class BookingsService {
         );
       }
 
+      /*
+       * The `no_overlapping_bookings` EXCLUDE constraint (see
+       * prisma/migrations/20260821202823_add_booking_overlap_exclusion)
+       * is raw SQL, not something `schema.prisma` declares as a
+       * `@@unique` — so Prisma doesn't recognize its Postgres error
+       * code (23P01) as one of its own known codes the way it does
+       * P2002. In practice this usually surfaces as a
+       * PrismaClientUnknownRequestError, with the real Postgres SQLSTATE
+       * embedded in the raw error message/meta rather than a clean
+       * `.code` field the way P2002 works.
+       *
+       * ⚠️ NOT EMPIRICALLY VERIFIED — this repo's build tooling
+       * (Prisma's schema/query-engine binaries) requires network access
+       * this environment's sandbox doesn't allow, so this branch could
+       * not be exercised against a real overlapping-booking request
+       * here. Before trusting this in the demo: create two genuinely
+       * overlapping bookings for the same desk locally, log the caught
+       * error's constructor name and full `.message`/`.meta` once, and
+       * confirm this actually matches — then this comment can be
+       * deleted. See PROGRESS.md's Open Questions.
+       */
+      const isExclusionViolation =
+        (err instanceof Prisma.PrismaClientUnknownRequestError ||
+          err instanceof Prisma.PrismaClientKnownRequestError) &&
+        /23P01|no_overlapping_bookings/.test(
+          (err as { message?: string }).message ?? '',
+        );
+
+      if (isExclusionViolation) {
+        throw new ConflictException(
+          'This slot overlaps with an existing booking.',
+        );
+      }
+
       throw err;
     }
   }

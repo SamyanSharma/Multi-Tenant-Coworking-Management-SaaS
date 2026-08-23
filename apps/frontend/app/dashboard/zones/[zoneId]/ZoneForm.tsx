@@ -33,9 +33,11 @@ export default function ZoneForm({
             ...getAuthHeaders(),
             'Content-Type': 'application/json',
           },
-          // IMPORTANT:
-          // Do NOT send spaceId here.
-          // The backend gets spaceId from the authenticated request.
+          // spaceId is NOT sent in the body — CreateZoneDto only accepts
+          // `name`. The backend derives spaceId from the x-space-id header
+          // (see TenantGuard), and forbidNonWhitelisted:true means sending
+          // an extra `spaceId` field here would get the whole request
+          // rejected with a 400, not just ignored.
           body: JSON.stringify({
             name: name.trim(),
           }),
