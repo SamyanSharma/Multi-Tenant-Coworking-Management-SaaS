@@ -200,26 +200,48 @@ export class BookingsService {
        * bookingId is stored in Stripe metadata so the webhook can
        * identify this Booking when payment succeeds.
        */
-      const paymentIntent =
-        await this.stripeService.createBookingPaymentIntent({
-          amountCents: space.priceCents,
-          connectedAccountId: spaceManager.stripeAccountId,
-          bookingId: booking.id,
-        });
+      let updatedBooking;
+      try {
+        const paymentIntent =
+          await this.stripeService.createBookingPaymentIntent({
+            amountCents: space.priceCents,
+            connectedAccountId: spaceManager.stripeAccountId,
+            bookingId: booking.id,
+          });
 
-      /*
-       * Save the Stripe PaymentIntent ID immediately.
-       *
-       * PENDING means the PaymentIntent has been created but Stripe
-       * has not yet confirmed successful payment.
-       */
-      const updatedBooking = await this.prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          paymentStatus: 'PENDING',
-          stripePaymentIntentId: paymentIntent.id,
-        },
-      });
+        /*
+         * Save the Stripe PaymentIntent ID immediately.
+         *
+         * PENDING means the PaymentIntent has been created but Stripe
+         * has not yet confirmed successful payment.
+         */
+        updatedBooking = await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            paymentStatus: 'PENDING',
+            stripePaymentIntentId: paymentIntent.id,
+          },
+        });
+      } catch (paymentErr) {
+        /*
+         * booking.create() above already committed in its own
+         * transaction, so a failure here (Stripe API error, network
+         * blip, bad connected-account state) leaves a booking row with
+         * no PaymentIntent behind unless we clean it up ourselves.
+         *
+         * That's not just clutter: the row still holds this desk/room's
+         * startTime/endTime, so the overlap-exclusion constraint would
+         * falsely reject a real future booking attempt for the exact
+         * same slot, even though this attempt never got a working
+         * payment. Delete it so the slot is genuinely free again, then
+         * surface a clear error instead of the raw Stripe error.
+         */
+        await this.prisma.booking.delete({ where: { id: booking.id } });
+
+        throw new ConflictException(
+          'Could not set up payment for this booking. Please try again.',
+        );
+      }
 
       /*
        * Notify connected clients only after the database contains
