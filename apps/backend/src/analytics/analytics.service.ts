@@ -55,18 +55,24 @@ export class AnalyticsService {
   }
 
   /**
-   * High-level summary for the caller's space: resource counts, total
-   * bookings, and revenue actually collected (PAID bookings only —
-   * PENDING/FAILED/UNPAID excluded, since counting those as revenue
-   * would overstate what the space has actually been paid).
+   * High-level summary for the caller's space.
+   *
+   * Field names here are a deliberate CONTRACT with
+   * apps/frontend/app/dashboard/analytics/page.tsx, which was built
+   * against this exact shape (see the comment at the top of that file):
+   *
+   *   { totalRevenue, activeBookings, totalBookings, utilizationRate }
+   *
+   * This used to return { zoneCount, deskCount, roomCount, totalBookings,
+   * totalRevenueCents } instead — a genuine field-name mismatch (no
+   * `activeBookings`/`utilizationRate` at all, `totalRevenueCents` vs.
+   * `totalRevenue`) that would have thrown at render time
+   * (`summary.activeBookings.toLocaleString()` on `undefined`). Fixed by
+   * making the backend match the already-built frontend contract, since
+   * the frontend's card layout was the more deliberately designed side
+   * of the two.
    */
   async spaceSummary(spaceId: string) {
-    const [zoneCount, deskCount, roomCount] = await Promise.all([
-      this.prisma.zone.count({ where: { spaceId } }),
-      this.prisma.desk.count({ where: { zone: { spaceId } } }),
-      this.prisma.room.count({ where: { zone: { spaceId } } }),
-    ]);
-
     const [desks, rooms] = await Promise.all([
       this.prisma.desk.findMany({
         where: { zone: { spaceId } },
@@ -79,6 +85,7 @@ export class AnalyticsService {
     ]);
     const deskIds = desks.map((d) => d.id);
     const roomIds = rooms.map((r) => r.id);
+    const totalResourceCount = deskIds.length + roomIds.length;
 
     const bookingWhere = {
       OR: [
@@ -87,25 +94,41 @@ export class AnalyticsService {
       ],
     };
 
-    const [totalBookings, paidBookings] = await Promise.all([
+    const now = new Date();
+
+    const [totalBookings, paidBookings, activeBookings] = await Promise.all([
       this.prisma.booking.count({ where: bookingWhere }),
+      // Revenue actually collected: PAID only. PENDING/FAILED/UNPAID
+      // excluded, since counting those would overstate what the space
+      // has actually been paid.
       this.prisma.booking.findMany({
         where: { ...bookingWhere, paymentStatus: 'PAID' },
         select: { amountCents: true },
       }),
+      // "Active" = booked right now (startTime <= now <= endTime) —
+      // same definition FloorPlan.tsx's isBookedNow() uses on the
+      // frontend, so this number matches what the live floor plan shows.
+      this.prisma.booking.count({
+        where: { ...bookingWhere, startTime: { lte: now }, endTime: { gte: now } },
+      }),
     ]);
 
-    const totalRevenueCents = paidBookings.reduce(
+    const totalRevenue = paidBookings.reduce(
       (sum, b) => sum + (b.amountCents ?? 0),
       0,
     );
 
+    // Fraction of bookable resources currently occupied. 0 (not NaN)
+    // when a space has no desks/rooms yet, since "0 of 0 booked" reads
+    // as 0% used, not undefined.
+    const utilizationRate =
+      totalResourceCount === 0 ? 0 : activeBookings / totalResourceCount;
+
     return {
-      zoneCount,
-      deskCount,
-      roomCount,
+      totalRevenue,
+      activeBookings,
       totalBookings,
-      totalRevenueCents,
+      utilizationRate,
     };
   }
 }
