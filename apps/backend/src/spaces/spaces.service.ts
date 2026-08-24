@@ -11,9 +11,7 @@ export class SpacesService {
     return this.prisma.space.findMany();
   }
 
-  // Space_Manager / Member — can only ever fetch the ONE space their
-  // guarded request says they belong to. Space is the tenant boundary
-  // itself, so this is a direct lookup by id, not a spaceId filter.
+  // Space manager only (RBAC table: "View own space")
   async findOwnSpace(spaceId: string) {
   const space = await this.prisma.space.findUnique({
     where: { id: spaceId },

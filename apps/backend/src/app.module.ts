@@ -28,11 +28,6 @@ import { AnalyticsModule } from './analytics/analytics.module';
   controllers: [AppController],
   providers: [
     AppService,
-    // Registered via the APP_GUARD DI token (not app.useGlobalGuards in
-    // main.ts) so TenantGuard can inject Reflector — and later, anything
-    // else it needs (e.g. a Prisma lookup) — through Nest's DI container.
-    // This makes EVERY route require a valid x-space-id header by
-    // default; use @SkipTenantCheck() to opt a route out.
     {
       provide: APP_GUARD,
       useClass: TenantGuard,

@@ -31,25 +31,13 @@ export class SpacesController {
     return this.spacesService.findAll();
   }
 
-  /**
-   * Get the current tenant's own space.
-   *
-   * IMPORTANT:
-   * This route must appear BEFORE @Get(':id').
-   * Otherwise Nest interprets /spaces/me as /spaces/:id
-   * with id = "me".
-   */
+ 
   @Get('me')
   findOwn(@Req() req: Request) {
     return this.spacesService.findOwnSpace(req.spaceId!);
   }
 
-  /**
-   * Get a specific space.
-   *
-   * Tenant isolation:
-   * The requested id must match the tenant's spaceId.
-   */
+
   @Get(':id')
   findById(
     @Param('id') id: string,
@@ -62,9 +50,7 @@ export class SpacesController {
     return this.spacesService.findOwnSpace(id);
   }
 
-  /**
-   * Only Platform Admin can create spaces.
-   */
+// Platform admin can create a new space.
   @UseGuards(RbacGuard)
   @Roles(Role.PLATFORM_ADMIN)
   @Post()
@@ -72,9 +58,7 @@ export class SpacesController {
     return this.spacesService.create(dto);
   }
 
-  /**
-   * Space Manager can update the price of their own space.
-   */
+  // Space manager can update the price of their own space.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post('me/price')

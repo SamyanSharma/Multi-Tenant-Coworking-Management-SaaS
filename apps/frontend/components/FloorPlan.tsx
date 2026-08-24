@@ -22,10 +22,7 @@ interface FloorPlanProps {
   rooms: Room[];
 }
 
-// "Currently booked" = any live booking on this resource whose time
-// range includes right now. Intentionally simple — a full calendar view
-// of future/past slots is a bigger feature than "is this desk taken
-// right now," which is what a live floor plan needs to show.
+// Returns true if the current time is between startTime and endTime.
 function isBookedNow(startTime: string, endTime: string): boolean {
   const now = Date.now();
   return new Date(startTime).getTime() <= now && new Date(endTime).getTime() >= now;
@@ -36,10 +33,6 @@ export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
   const setInitial = useLiveBookingsStore((s) => s.setInitial);
   const [loaded, setLoaded] = useState(false);
 
-  // Seed the store with whatever's already booked when this component
-  // first mounts — the socket only tells us about NEW bookings from this
-  // point forward, so without this seed step, a desk booked five minutes
-  // before you opened the page would incorrectly show as free.
   useEffect(() => {
     async function seedInitialBookings() {
       try {
@@ -54,9 +47,6 @@ export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
       }
     }
     seedInitialBookings();
-    // Only seed once per mount — after this, updates come from the
-    // socket (via dashboard/layout.tsx's listeners), not repeated fetches.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const bookedResourceIds = useMemo(() => {
