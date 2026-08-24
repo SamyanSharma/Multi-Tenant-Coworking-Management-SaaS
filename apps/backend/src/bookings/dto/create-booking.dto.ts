@@ -14,8 +14,5 @@ export class CreateBookingDto {
 
   @IsDateString()
   endTime: string;
-  // Deliberately NO userId field — derived from the authenticated
-  // caller once real auth exists (Stage 2). For now, wire this to
-  // whatever placeholder-user mechanism the team agrees on; see the
-  // TODO in BookingsController.
+  
 }
