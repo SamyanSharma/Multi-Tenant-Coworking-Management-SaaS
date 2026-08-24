@@ -32,10 +32,7 @@ export class DesksService {
   }
 
   async create(dto: CreateDeskDto, spaceId: string) {
-    // Verify the target zone actually belongs to the caller's space BEFORE
-    // creating — otherwise a Space_Manager could pass any zoneId and create
-    // a desk inside another tenant's zone, since Desk itself has no
-    // spaceId column to check against.
+    
     const zone = await this.prisma.zone.findUnique({
       where: { id: dto.zoneId },
     });

@@ -10,21 +10,7 @@ interface ConnectParams {
   role: Role | null;
 }
 
-// Connects (or reuses) a single shared Socket.io connection for the
-// current dashboard session.
-//
-// IMPORTANT: the auth payload keys here (`spaceId`, `role`) must match
-// events.gateway.ts's handleConnection exactly — it reads
-// `socket.handshake.auth.spaceId` and `socket.handshake.auth.role` and
-// rejects the connection (emits `connection_error`, disconnects) if
-// either is missing or role isn't SPACE_MANAGER/MEMBER. There is no
-// `userId` or `token` field in the real handshake contract — the
-// gateway doesn't read either, so sending them is harmless but doesn't
-// do anything.
-//
-// Call connectSocket() once when the dashboard mounts, disconnectSocket()
-// on unmount. Don't call this per-page — one connection for the whole
-// dashboard session.
+//.
 export function connectSocket({ spaceId, role }: ConnectParams): Socket | null {
   // PLATFORM_ADMIN has no spaceId, and the gateway only allows
   // SPACE_MANAGER/MEMBER anyway — don't bother connecting.
