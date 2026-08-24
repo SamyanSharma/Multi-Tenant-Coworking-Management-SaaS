@@ -9,14 +9,7 @@ import type { Request } from 'express';
 import { Role } from '@prisma/client';
 import { ROLES_KEY } from './roles.decorator';
 
-/**
- * NOT registered globally — apply per-route/controller with @UseGuards
- * alongside @Roles(...). Unlike TenantGuard (every route needs a tenant),
- * not every route needs a role restriction, so this stays opt-in.
- *
- * Reads role from the x-user-role header as a placeholder until real auth
- * exists (same caveat as TenantGuard's spaceId header).
- */
+// reading role from the header instead of the frontend through authentication
 @Injectable()
 export class RbacGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -27,7 +20,7 @@ export class RbacGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    // No @Roles() declared at all -> no restriction from this guard.
+    // no roles needed
     if (!requiredRoles) {
       return true;
     }
