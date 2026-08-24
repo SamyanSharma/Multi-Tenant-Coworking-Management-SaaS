@@ -5,11 +5,7 @@ describe('StripeService.calculateFeeSplit', () => {
   let service: StripeService;
 
   beforeAll(() => {
-    // StripeService's constructor requires a TEST MODE secret key to
-    // exist (fails loudly otherwise, by design — see stripe.service.ts).
-    // A fake-but-correctly-shaped test key is enough to construct the
-    // service for testing calculateFeeSplit, which is pure arithmetic
-    // and never actually calls Stripe's API.
+   
     process.env.STRIPE_SECRET_KEY = 'sk_test_unit_test_placeholder_key';
     service = new StripeService();
   });
@@ -22,9 +18,7 @@ describe('StripeService.calculateFeeSplit', () => {
   });
 
   it('always sums back to the original amount, even with rounding', () => {
-    // 101 cents * 5% = 5.05 -> rounds to 5. This is the case that would
-    // break if platformFee and managerAmount were rounded independently
-    // instead of managerAmount being derived by subtraction.
+    // 5% of 101 cents = 5.05, which rounds to 5 cents.
     const amount = 101;
     const { platformFeeCents, managerAmountCents } =
       service.calculateFeeSplit(amount);
@@ -56,9 +50,6 @@ describe('StripeService.calculateFeeSplit', () => {
     );
   });
 
-  // Sweeps a range of realistic booking amounts ($1 to $500) to confirm
-  // the split always sums back exactly, rather than trusting the three
-  // hand-picked cases above to represent every rounding edge case.
   it('sums back exactly for a wide sweep of amounts', () => {
     for (let amountCents = 100; amountCents <= 50000; amountCents += 137) {
       const { platformFeeCents, managerAmountCents } =
