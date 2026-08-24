@@ -114,17 +114,7 @@ export class WebhookController {
           break;
         }
 
-        /*
-         * Stripe Accounts v2 compatibility:
-         *
-         * This project creates Connect accounts using Stripe's newer
-         * Accounts v2 API. The older Account object fields
-         * `charges_enabled` and `details_submitted` are not sufficient
-         * for determining onboarding completion for this account type.
-         *
-         * We therefore inspect the account requirements reported by the
-         * webhook when available.
-         */
+       
 
         const accountData = account as Stripe.Account & {
           requirements?: {
@@ -148,21 +138,6 @@ export class WebhookController {
 
         const disabledReason =
           accountData.requirements?.disabled_reason ?? null;
-
-        /*
-         * For the v2 account we created, Stripe's direct API response
-         * reports:
-         *
-         *   applied_configurations: ["merchant"]
-         *   requirements: null
-         *
-         * When requirements are null, Stripe has no outstanding
-         * requirements to report for the account.
-         *
-         * We also retain the traditional Accounts v1 check for
-         * compatibility with webhook payloads that still contain those
-         * fields.
-         */
 
         const traditionalAccountComplete = Boolean(
           account.charges_enabled &&
