@@ -13,11 +13,26 @@ if (!connectionString) {
 const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
+// Fixed, hardcoded dev-only IDs (NOT real cuids from a random run).
+//
+// These exist so `apps/frontend/app/dev-login/page.tsx` can hardcode
+// matching userIds/spaceId and NOT go stale every time someone reseeds
+// or resets the DB — Prisma's default `@default(cuid())` would otherwise
+// generate a new id per run, which is exactly the "stale localStorage
+// id -> silent 404" bug class this project already hit once (see
+// PROGRESS.md's 2026-08-23 evening entry). Keep these two files in sync
+// if either changes. Both dev-login and this pinning should be removed
+// together before a real/final deployment — see PROGRESS.md.
+const DEV_SPACE_ID = 'devseed_space_0000000001';
+const DEV_MANAGER_ID = 'devseed_user_manager_001';
+const DEV_MEMBER_ID = 'devseed_user_member_0001';
+
 async function main() {
   const space = await prisma.space.upsert({
     where: { slug: 'test-space' },
     update: {},
     create: {
+      id: DEV_SPACE_ID,
       name: 'Test Space',
       slug: 'test-space',
       priceCents: 1500,
@@ -28,6 +43,7 @@ async function main() {
     where: { email: 'manager@test-space.dev' },
     update: { spaceId: space.id, role: Role.SPACE_MANAGER },
     create: {
+      id: DEV_MANAGER_ID,
       email: 'manager@test-space.dev',
       name: 'Test Space Manager',
       role: Role.SPACE_MANAGER,
@@ -39,6 +55,7 @@ async function main() {
     where: { email: 'member@test-space.dev' },
     update: { spaceId: space.id, role: Role.MEMBER },
     create: {
+      id: DEV_MEMBER_ID,
       email: 'member@test-space.dev',
       name: 'Test Member',
       role: Role.MEMBER,

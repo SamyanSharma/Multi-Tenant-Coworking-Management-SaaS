@@ -14,13 +14,20 @@ import {
   Terminal
 } from 'lucide-react';
 
-const SPACE_ID = 'cmslgiyh400003gmlmy7rvxvd';
+// DEV-ONLY TOOL — remove this whole page before the final/production
+// build (see MASTER_PROMPT.md / PROGRESS.md). These IDs are NOT
+// arbitrary: they must match the fixed DEV_SPACE_ID / DEV_MANAGER_ID /
+// DEV_MEMBER_ID constants pinned in `apps/backend/prisma/seed.ts`. If
+// you change one, change the other — a mismatch here silently sets
+// stale auth state (401/404 on the first real API call, no visible
+// error), which is exactly the bug this pinning was added to prevent.
+const SPACE_ID = 'devseed_space_0000000001';
 
 const USERS = [
   { 
     label: 'Space Manager', 
     role: 'SPACE_MANAGER' as const, 
-    userId: 'cmt5snnwb0000e8mlqjew5z8d',
+    userId: 'devseed_user_manager_001',
     description: 'Full access to manage spaces, members, and settings',
     icon: Shield,
     accentColor: 'blue'
@@ -28,7 +35,7 @@ const USERS = [
   { 
     label: 'Member', 
     role: 'MEMBER' as const, 
-    userId: 'cmt5snnwj0001e8mlziab87km',
+    userId: 'devseed_user_member_0001',
     description: 'Standard access to view and interact with spaces',
     icon: User,
     accentColor: 'green'
@@ -43,6 +50,18 @@ export default function DevLoginPage() {
   const [status, setStatus] = useState<LoginStatus>('idle');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Safety net in case this page isn't deleted before a real deploy —
+  // see the removal note above. Doesn't replace deleting the page.
+  if (process.env.NODE_ENV === 'production') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 text-center">
+        <p className="text-slate-500 text-sm">
+          Dev login is disabled in production builds.
+        </p>
+      </div>
+    );
+  }
 
   async function loginAs(user: typeof USERS[number]) {
     setStatus('loading');
