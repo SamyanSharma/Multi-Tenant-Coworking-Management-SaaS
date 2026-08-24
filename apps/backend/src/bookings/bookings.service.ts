@@ -4,13 +4,14 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+
 import { BookableType, Prisma } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { StripeService } from '../payments/stripe.service';
 
-// Prisma's unique-constraint-violation error code.
 const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 
 @Injectable()
@@ -21,21 +22,21 @@ export class BookingsService {
     private readonly stripeService: StripeService,
   ) {}
 
-  /// Resolves a bookable (Desk or Room) and confirms it belongs to the given spaceId.
   private async resolveBookable(
     bookableType: BookableType,
     bookableId: string,
     spaceId: string,
   ) {
     if (bookableType === BookableType.DESK) {
-      
       const desk = await this.prisma.desk.findUnique({
         where: { id: bookableId },
         include: { zone: true },
       });
 
       if (!desk || desk.zone.spaceId !== spaceId) {
-        throw new NotFoundException('Desk not found in this space');
+        throw new NotFoundException(
+          'Desk not found in this space',
+        );
       }
 
       return desk;
@@ -48,7 +49,9 @@ export class BookingsService {
       });
 
       if (!room || room.zone.spaceId !== spaceId) {
-        throw new NotFoundException('Room not found in this space');
+        throw new NotFoundException(
+          'Room not found in this space',
+        );
       }
 
       return room;
@@ -59,42 +62,66 @@ export class BookingsService {
     );
   }
 
+
   async findAllForSpace(spaceId: string) {
     const [desks, rooms] = await Promise.all([
       this.prisma.desk.findMany({
-        where: { zone: { spaceId } },
-        select: { id: true },
+        where: {
+          zone: { spaceId },
+        },
+        select: {
+          id: true,
+        },
       }),
+
       this.prisma.room.findMany({
-        where: { zone: { spaceId } },
-        select: { id: true },
+        where: {
+          zone: { spaceId },
+        },
+        select: {
+          id: true,
+        },
       }),
     ]);
 
-    const deskIds = desks.map((d) => d.id);
-    const roomIds = rooms.map((r) => r.id);
+
+    const deskIds = desks.map(
+      (desk) => desk.id,
+    );
+
+    const roomIds = rooms.map(
+      (room) => room.id,
+    );
+
 
     return this.prisma.booking.findMany({
       where: {
         OR: [
           {
             bookableType: BookableType.DESK,
-            bookableId: { in: deskIds },
+            bookableId: {
+              in: deskIds,
+            },
           },
           {
             bookableType: BookableType.ROOM,
-            bookableId: { in: roomIds },
+            bookableId: {
+              in: roomIds,
+            },
           },
         ],
       },
     });
   }
 
+
+
   async create(
     dto: CreateBookingDto,
     spaceId: string,
     userId: string,
   ) {
+
     const {
       bookableType,
       bookableId,
@@ -102,45 +129,59 @@ export class BookingsService {
       endTime,
     } = dto;
 
-    // Validate the booking time range.
-    if (new Date(startTime) >= new Date(endTime)) {
+
+    if (
+      new Date(startTime) >= new Date(endTime)
+    ) {
       throw new BadRequestException(
         'startTime must be before endTime',
       );
     }
 
-    // Confirm that the Desk/Room exists and belongs to this tenant.
+
     await this.resolveBookable(
       bookableType,
       bookableId,
       spaceId,
     );
 
-    // Read the Space's current server-side booking price.
-  
-    const space = await this.prisma.space.findUnique({
-      where: { id: spaceId },
-      select: { priceCents: true },
-    });
 
-    if (!space || space.priceCents === null) {
+    const space =
+      await this.prisma.space.findUnique({
+        where: {
+          id: spaceId,
+        },
+        select: {
+          priceCents: true,
+        },
+      });
+
+
+    if (
+      !space ||
+      space.priceCents === null
+    ) {
       throw new BadRequestException(
         'Booking price has not been configured for this space',
       );
     }
 
-    // Find the Space Manager responsible for this tenant.
-    const spaceManager = await this.prisma.user.findFirst({
-      where: {
-        spaceId,
-        role: 'SPACE_MANAGER',
-      },
-      select: {
-        id: true,
-        stripeAccountId: true,
-        stripeOnboardingComplete: true,
-      },
-    });
+
+
+    const spaceManager =
+      await this.prisma.user.findFirst({
+        where: {
+          spaceId,
+          role: 'SPACE_MANAGER',
+        },
+        select: {
+          id: true,
+          stripeAccountId: true,
+          stripeOnboardingComplete: true,
+        },
+      });
+
+
 
     if (!spaceManager) {
       throw new BadRequestException(
@@ -148,92 +189,160 @@ export class BookingsService {
       );
     }
 
-    // A Stripe Connect account is required for the 95/5 destination charge.
-    if (!spaceManager.stripeAccountId) {
-      throw new BadRequestException(
-        'Space Manager has not connected a Stripe account',
-      );
-    }
 
-    // The Connect account must have completed onboarding.
-    if (!spaceManager.stripeOnboardingComplete) {
-      throw new BadRequestException(
-        'Space Manager has not completed Stripe onboarding',
-      );
-    }
 
     try {
-      // Create the Booking row in the database, then create the Stripe
-      const booking = await this.prisma.$transaction(async (tx) => {
-        return tx.booking.create({
-          data: {
-            bookableType,
-            bookableId,
-            userId,
-            startTime,
-            endTime,
-            amountCents: space.priceCents,
-          },
-        });
-      });
 
-      // Create a Stripe PaymentIntent for the booking, which will be confirmed
-      let updatedBooking;
-      try {
-        const paymentIntent =
-          await this.stripeService.createBookingPaymentIntent({
-            amountCents: space.priceCents,
-            connectedAccountId: spaceManager.stripeAccountId,
-            bookingId: booking.id,
+      /*
+        Booking is created first.
+
+        Payment is a separate step.
+        This allows booking creation even when
+        Stripe Connect is not configured.
+      */
+
+      const booking =
+        await this.prisma.$transaction(
+          async (tx) => {
+
+            return tx.booking.create({
+              data: {
+                bookableType,
+                bookableId,
+                userId,
+                startTime,
+                endTime,
+                amountCents:
+                  space.priceCents,
+              },
+            });
+
+          },
+        );
+
+
+
+      let updatedBooking = booking;
+
+
+
+      /*
+        Future Stripe flow:
+
+        If Space Manager completed Stripe onboarding,
+        create PaymentIntent and attach it.
+
+        Otherwise keep booking without payment.
+      */
+
+      if (
+        spaceManager.stripeAccountId &&
+        spaceManager.stripeOnboardingComplete
+      ) {
+
+        try {
+
+          const paymentIntent =
+            await this.stripeService
+              .createBookingPaymentIntent({
+                amountCents:
+                  space.priceCents,
+
+                connectedAccountId:
+                  spaceManager.stripeAccountId,
+
+                bookingId:
+                  booking.id,
+              });
+
+
+
+          updatedBooking =
+            await this.prisma.booking.update({
+              where: {
+                id: booking.id,
+              },
+
+              data: {
+                paymentStatus:
+                  'PENDING',
+
+                stripePaymentIntentId:
+                  paymentIntent.id,
+              },
+            });
+
+
+        } catch {
+
+          /*
+            Payment setup failed.
+
+            Remove booking because a failed
+            payment should not block the slot.
+          */
+
+          await this.prisma.booking.delete({
+            where: {
+              id: booking.id,
+            },
           });
 
-        // Update the booking with the Stripe PaymentIntent 
-        updatedBooking = await this.prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            paymentStatus: 'PENDING',
-            stripePaymentIntentId: paymentIntent.id,
-          },
-        });
-      } catch (paymentErr) {
-        
-        await this.prisma.booking.delete({ where: { id: booking.id } });
 
-        throw new ConflictException(
-          'Could not set up payment for this booking. Please try again.',
-        );
+          throw new ConflictException(
+            'Could not setup payment for booking',
+          );
+        }
       }
+
+
 
       this.eventsGateway.emitBookingCreated(
         spaceId,
         updatedBooking,
       );
 
+
       return updatedBooking;
+
+
+
     } catch (err: unknown) {
-      // Handle known Prisma errors for unique constraint violations
+
+
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === PRISMA_UNIQUE_CONSTRAINT_VIOLATION
+        err.code ===
+          PRISMA_UNIQUE_CONSTRAINT_VIOLATION
       ) {
+
         throw new ConflictException(
           'This slot is already booked.',
         );
+
       }
 
-      // Handle known Prisma errors for exclusion constraint violations (overlapping bookings)
-      const isExclusionViolation =
-        (err instanceof Prisma.PrismaClientUnknownRequestError ||
-          err instanceof Prisma.PrismaClientKnownRequestError) &&
+
+
+      const overlapError =
+        (
+          err instanceof Prisma.PrismaClientUnknownRequestError ||
+          err instanceof Prisma.PrismaClientKnownRequestError
+        ) &&
         /23P01|no_overlapping_bookings/.test(
-          (err as { message?: string }).message ?? '',
+          (err as any).message ?? '',
         );
 
-      if (isExclusionViolation) {
+
+
+      if (overlapError) {
+
         throw new ConflictException(
-          'This slot overlaps with an existing booking.',
+          'This slot overlaps with existing booking.',
         );
+
       }
+
 
       throw err;
     }
