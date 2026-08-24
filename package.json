@@ -16,5 +16,8 @@
   "workspaces": [
     "apps/backend",
     "apps/frontend"
-  ]
+  ],
+  "dependencies": {
+    "lucide-react": "^1.34.0"
+  }
 }

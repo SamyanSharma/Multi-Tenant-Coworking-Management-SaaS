@@ -111,8 +111,8 @@ export class PaymentsController {
     const onboardingUrl =
       await this.stripeService.createOnboardingLink(
         accountId,
-        `${frontendUrl}/dashboard/payments/onboard/refresh`,
-        `${frontendUrl}/dashboard/payments/onboard/complete`,
+        `${frontendUrl}/dashboard/settings/billing`,
+        `${frontendUrl}/dashboard/settings/billing`,
       );
 
     return {
