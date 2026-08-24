@@ -19,19 +19,7 @@ export class PaymentsController {
     private readonly prisma: PrismaService,
   ) {}
 
-  /**
-   * Starts (or resumes) Stripe Connect onboarding for the calling
-   * Space_Manager.
-   *
-   * The current project still uses x-user-id as a placeholder for
-   * authenticated identity until JWT auth is implemented.
-   *
-   * IMPORTANT:
-   * The user lookup is scoped to req.spaceId as well as userId.
-   * This prevents a Space_Manager from one tenant from supplying
-   * another tenant's user id and creating/linking a Stripe account
-   * for that user.
-   */
+ // Endpoint for onboarding a Space Manager to Stripe Connect.
   @Roles(Role.SPACE_MANAGER)
   @Post('onboard')
   async onboard(@Req() req: Request) {
@@ -46,17 +34,7 @@ export class PaymentsController {
       throw new BadRequestException('Missing spaceId');
     }
 
-    /*
-     * Tenant-scoped lookup:
-     *
-     * A valid userId by itself is NOT enough.
-     * The user must:
-     *   1. have the supplied userId,
-     *   2. belong to this request's space, and
-     *   3. actually be a SPACE_MANAGER.
-     *
-     * This prevents cross-tenant Stripe account linkage.
-     */
+   // Verify the user is a Space Manager in this space before proceeding.
     const user = await this.prisma.user.findFirst({
       where: {
         id: userId,
@@ -71,10 +49,7 @@ export class PaymentsController {
       );
     }
 
-    /*
-     * Reuse an existing Stripe Connect account when one is already
-     * stored; otherwise create a new Express Connect account.
-     */
+    // Create or retrieve the Stripe Connect account for this user.
     const accountId =
       await this.stripeService.createOrGetConnectAccount({
         id: user.id,
@@ -82,14 +57,7 @@ export class PaymentsController {
         stripeAccountId: user.stripeAccountId,
       });
 
-    /*
-     * Persist the Stripe account id immediately when this is the
-     * first onboarding attempt.
-     *
-     * Having a Stripe account is NOT the same as completing
-     * Stripe onboarding. Completion is confirmed separately by
-     * the account.updated webhook.
-     */
+    // If the user didn't have a Stripe account ID, update it in the database.
     if (!user.stripeAccountId) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -99,12 +67,7 @@ export class PaymentsController {
       });
     }
 
-    /*
-     * Stripe Account Links are one-time-use URLs.
-     *
-     * FRONTEND_URL can be configured for deployment while keeping
-     * localhost:3001 as the local-development default.
-     */
+    // Generate the onboarding link for the Stripe Connect account.
     const frontendUrl =
       process.env.FRONTEND_URL ?? 'http://localhost:3001';
 

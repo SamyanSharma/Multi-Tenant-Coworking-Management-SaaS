@@ -38,11 +38,7 @@ export class StripeService {
     this.stripe = new Stripe(secretKey);
   }
 
-  /**
-   * Splits a booking payment into:
-   * - 5% platform fee
-   * - 95% Space_Manager amount
-   */
+
   calculateFeeSplit(amountCents: number): {
     platformFeeCents: number;
     managerAmountCents: number;
@@ -66,15 +62,7 @@ export class StripeService {
     };
   }
 
-  /**
-   * Creates a Stripe PaymentIntent for a booking.
-   *
-   * Full amount:
-   * - 5% platform application fee
-   * - 95% transferred to the Space_Manager
-   *
-   * Card is the only payment method for this MVP.
-   */
+ 
   async createBookingPaymentIntent(params: {
     amountCents: number;
     connectedAccountId: string;
@@ -131,14 +119,6 @@ export class StripeService {
     );
   }
 
-  /**
-   * Ensures a Stripe Connect account exists for the
-   * Space_Manager.
-   *
-   * Existing account IDs are reused.
-   *
-   * New accounts are created through Stripe Accounts v2.
-   */
   async createOrGetConnectAccount(user: {
     id: string;
     email: string;
@@ -149,13 +129,6 @@ export class StripeService {
       return user.stripeAccountId;
     }
 
-    /**
-     * Accounts v2 requires the account identity country
-     * before merchant configuration can be supplied.
-     *
-     * This capstone currently uses USD and Stripe test mode,
-     * so the demo manager account is created as a US account.
-     */
     const response = await this.stripe.rawRequest(
       'POST',
       '/v2/core/accounts',
@@ -196,10 +169,7 @@ export class StripeService {
       },
     );
 
-    /**
-     * rawRequest's TypeScript definition does not expose
-     * the Accounts v2 response shape, so narrow it locally.
-     */
+   
     const accountResponse = response as unknown as {
       id?: string;
     };
@@ -215,9 +185,7 @@ export class StripeService {
     return accountId;
   }
 
-  /**
-   * Generates a hosted Stripe Connect onboarding link.
-   */
+ 
   async createOnboardingLink(
     accountId: string,
     refreshUrl: string,
