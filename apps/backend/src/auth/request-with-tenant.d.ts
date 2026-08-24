@@ -1,7 +1,6 @@
 import { Role } from '@prisma/client';
 
-// Augments Express's Request type so req.spaceId / req.userRole are typed
-// everywhere downstream (controllers, services) without casting.
+// Augments Express's Request type so req.spaceId 
 declare module 'express' {
   interface Request {
     spaceId?: string;
