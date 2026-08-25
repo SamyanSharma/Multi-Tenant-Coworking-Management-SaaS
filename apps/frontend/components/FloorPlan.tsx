@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { getAuthHeaders } from '@/lib/api';
+import { useAuthStore } from '@/store/authStore';
 import { useLiveBookingsStore } from '@/store/liveBookingsStore';
 
 interface Desk {
@@ -31,7 +33,14 @@ function isBookedNow(startTime: string, endTime: string): boolean {
 export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
   const liveBookings = useLiveBookingsStore((s) => s.bookings);
   const setInitial = useLiveBookingsStore((s) => s.setInitial);
+  const role = useAuthStore((s) => s.role);
   const [loaded, setLoaded] = useState(false);
+
+  // Only MEMBER can actually create a booking (see RBAC table in
+  // ARCHITECTURE.md — POST /bookings is MEMBER-only). A SPACE_MANAGER
+  // clicking a "Book" button would just get a 403, so the button only
+  // renders for MEMBER rather than rendering-then-failing.
+  const canBook = role === 'MEMBER';
 
   useEffect(() => {
     async function seedInitialBookings() {
@@ -71,14 +80,26 @@ export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
               return (
                 <div
                   key={desk.id}
-                  className={`border rounded p-3 text-sm transition-colors ${
+                  className={`border rounded p-3 text-sm transition-colors flex flex-col gap-2 ${
                     booked
                       ? 'bg-red-50 border-red-300 text-red-700'
                       : 'bg-green-50 border-green-300 text-green-700'
                   }`}
                 >
-                  <div className="font-medium">{desk.name}</div>
-                  <div className="text-xs">{booked ? 'Booked' : 'Available'}</div>
+                  <div>
+                    <div className="font-medium">{desk.name}</div>
+                    <div className="text-xs">{booked ? 'Booked' : 'Available'}</div>
+                  </div>
+                  {canBook && !booked && (
+                    <Link
+                      href={`/dashboard/book/desk/${desk.id}`}
+                      className="inline-flex items-center justify-center bg-slate-900 text-white
+                                 rounded px-2 py-1 text-xs font-medium hover:bg-slate-800
+                                 transition-colors"
+                    >
+                      Book
+                    </Link>
+                  )}
                 </div>
               );
             })}
@@ -95,16 +116,28 @@ export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
               return (
                 <div
                   key={room.id}
-                  className={`border rounded p-3 text-sm transition-colors ${
+                  className={`border rounded p-3 text-sm transition-colors flex flex-col gap-2 ${
                     booked
                       ? 'bg-red-50 border-red-300 text-red-700'
                       : 'bg-green-50 border-green-300 text-green-700'
                   }`}
                 >
-                  <div className="font-medium">{room.name}</div>
-                  <div className="text-xs">
-                    {booked ? 'Booked' : 'Available'} · cap {room.capacity}
+                  <div>
+                    <div className="font-medium">{room.name}</div>
+                    <div className="text-xs">
+                      {booked ? 'Booked' : 'Available'} · cap {room.capacity}
+                    </div>
                   </div>
+                  {canBook && !booked && (
+                    <Link
+                      href={`/dashboard/book/room/${room.id}`}
+                      className="inline-flex items-center justify-center bg-slate-900 text-white
+                                 rounded px-2 py-1 text-xs font-medium hover:bg-slate-800
+                                 transition-colors"
+                    >
+                      Book
+                    </Link>
+                  )}
                 </div>
               );
             })}
