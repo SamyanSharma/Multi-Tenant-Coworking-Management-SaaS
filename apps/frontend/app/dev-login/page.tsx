@@ -11,7 +11,8 @@ import {
   Loader2, 
   AlertCircle,
   CheckCircle2,
-  Terminal
+  Terminal,
+  Crown
 } from 'lucide-react';
 
 // DEV-ONLY TOOL — remove this whole page before the final/production
@@ -21,13 +22,32 @@ import {
 // you change one, change the other — a mismatch here silently sets
 // stale auth state (401/404 on the first real API call, no visible
 // error), which is exactly the bug this pinning was added to prevent.
-const SPACE_ID = 'devseed_space_0000000001';
+//
+// MUST also satisfy TenantGuard's CUID_REGEX (/^c[a-z0-9]{20,}$/i) —
+// the original 'devseed_space_...' values didn't (wrong first letter +
+// underscores), causing a 400 "x-space-id is not a valid id" on every
+// request. Fixed 2026-08-25 to match seed.ts — see PROGRESS.md.
+const SPACE_ID = 'cdevseedspace00000000001';
 
 const USERS = [
+  {
+    label: 'Platform Admin',
+    role: 'PLATFORM_ADMIN' as const,
+    // PLATFORM_ADMIN is never scoped to a space — spaceId stays null.
+    // GET /spaces (the route this role actually calls) is marked
+    // @SkipTenantCheck() specifically so a null/missing x-space-id
+    // header is fine here; every other role below needs a real one.
+    spaceId: null as string | null,
+    userId: null as string | null,
+    description: 'Full system access across all spaces',
+    icon: Crown,
+    accentColor: 'purple',
+  },
   { 
     label: 'Space Manager', 
     role: 'SPACE_MANAGER' as const, 
-    userId: 'devseed_user_manager_001',
+    spaceId: SPACE_ID as string | null,
+    userId: 'cdevseedmanager0000000001' as string | null,
     description: 'Full access to manage spaces, members, and settings',
     icon: Shield,
     accentColor: 'blue'
@@ -35,7 +55,8 @@ const USERS = [
   { 
     label: 'Member', 
     role: 'MEMBER' as const, 
-    userId: 'devseed_user_member_0001',
+    spaceId: SPACE_ID as string | null,
+    userId: 'cdevseedmember00000000001' as string | null,
     description: 'Standard access to view and interact with spaces',
     icon: User,
     accentColor: 'green'
@@ -65,7 +86,10 @@ export default function DevLoginPage() {
 
   async function loginAs(user: typeof USERS[number]) {
     setStatus('loading');
-    setSelectedUser(user.userId);
+    // Keyed on role, not userId — PLATFORM_ADMIN's userId is null, and
+    // comparing against null would make it look pre-selected before
+    // anything was ever clicked (selectedUser also starts out null).
+    setSelectedUser(user.role);
     setError(null);
 
     try {
@@ -74,7 +98,7 @@ export default function DevLoginPage() {
       setAuth({
         token: 'dummy',
         role: user.role,
-        spaceId: SPACE_ID,
+        spaceId: user.spaceId,
         userId: user.userId,
       });
 
@@ -125,13 +149,13 @@ export default function DevLoginPage() {
             <div className="space-y-3">
               {USERS.map((user) => {
                 const Icon = user.icon;
-                const isSelected = selectedUser === user.userId;
+                const isSelected = selectedUser === user.role;
                 const isLoading = isSelected && status === 'loading';
                 const isSuccess = isSelected && status === 'success';
 
                 return (
                   <button
-                    key={user.userId}
+                    key={user.role}
                     onClick={() => loginAs(user)}
                     disabled={status === 'loading'}
                     className={`
@@ -147,11 +171,13 @@ export default function DevLoginPage() {
                     <div className="flex items-center gap-3">
                       <div className={`
                         p-2 rounded-lg shrink-0
-                        ${user.accentColor === 'blue' ? 'bg-blue-100' : 'bg-green-100'}
+                        ${user.accentColor === 'purple' ? 'bg-purple-100' :
+                          user.accentColor === 'blue' ? 'bg-blue-100' : 'bg-green-100'}
                       `}>
                         <Icon className={`
                           w-5 h-5
-                          ${user.accentColor === 'blue' ? 'text-blue-600' : 'text-green-600'}
+                          ${user.accentColor === 'purple' ? 'text-purple-600' :
+                            user.accentColor === 'blue' ? 'text-blue-600' : 'text-green-600'}
                         `} />
                       </div>
                       
@@ -162,7 +188,9 @@ export default function DevLoginPage() {
                           </h3>
                           <span className={`
                             px-2 py-0.5 rounded-full text-xs font-medium
-                            ${user.role === 'SPACE_MANAGER' 
+                            ${user.role === 'PLATFORM_ADMIN'
+                              ? 'bg-purple-100 text-purple-700'
+                              : user.role === 'SPACE_MANAGER' 
                               ? 'bg-blue-100 text-blue-700' 
                               : 'bg-green-100 text-green-700'
                             }

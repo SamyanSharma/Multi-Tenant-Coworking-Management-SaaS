@@ -23,9 +23,16 @@ const prisma = new PrismaClient({ adapter });
 // PROGRESS.md's 2026-08-23 evening entry). Keep these two files in sync
 // if either changes. Both dev-login and this pinning should be removed
 // together before a real/final deployment — see PROGRESS.md.
-const DEV_SPACE_ID = 'devseed_space_0000000001';
-const DEV_MANAGER_ID = 'devseed_user_manager_001';
-const DEV_MEMBER_ID = 'devseed_user_member_0001';
+//
+// MUST match TenantGuard's CUID_REGEX (/^c[a-z0-9]{20,}$/i) — start with
+// 'c', lowercase alphanumeric only, no underscores, 21+ chars total. The
+// original 'devseed_space_...' values did NOT satisfy this (wrong first
+// letter + underscores), so every request using them was rejected with
+// a 400 "x-space-id is not a valid id" before it ever reached a
+// controller. Fixed 2026-08-25 — see PROGRESS.md.
+const DEV_SPACE_ID = 'cdevseedspace00000000001';
+const DEV_MANAGER_ID = 'cdevseedmanager0000000001';
+const DEV_MEMBER_ID = 'cdevseedmember00000000001';
 
 async function main() {
   const space = await prisma.space.upsert({
