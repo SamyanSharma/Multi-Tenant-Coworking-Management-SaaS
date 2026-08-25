@@ -7,7 +7,6 @@ import {
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 
-/// CUIDs are used for all primary keys in the database, including spaceId.
 const CUID_REGEX = /^c[a-z0-9]{20,}$/i;
 
 const ALLOWED_ROLES = [
@@ -19,7 +18,6 @@ function spaceRoom(spaceId: string): string {
   return `space:${spaceId}`;
 }
 
-/// The EventsGateway is responsible for handling WebSocket connections and broadcasting events to clients.
 @WebSocketGateway({
   cors: {
     origin: '*',
@@ -40,7 +38,6 @@ export class EventsGateway
     const role =
       client.handshake.auth?.role as string | undefined;
 
-    // Validate the spaceId and role from the handshake.auth object
     if (
       !spaceId ||
       !CUID_REGEX.test(spaceId) ||

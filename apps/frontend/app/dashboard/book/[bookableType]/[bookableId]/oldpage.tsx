@@ -4,7 +4,6 @@ import { useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useBookingStore, BookableType } from '@/store/bookingStore';
 import DateCalendar from '@/components/DateCalendar';
-import TimeSlotPicker from '@/components/TimeSlotPicker';
 import {
   Calendar,
   Clock,
@@ -13,15 +12,35 @@ import {
   Loader2,
   ArrowLeft,
   CalendarDays,
+  Info,
   Zap,
 } from 'lucide-react';
 
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
+// Click-to-pick start times, every 30 minutes across a full day.
+// Coworking spaces don't have a universal "business hours" assumption
+// built in anywhere else in this app (bookings.service.ts doesn't
+// restrict by time of day), so this offers the full range rather than
+// arbitrarily narrowing it — just makes clicking through 48 slots fast
+// via the compact grid below instead of a long dropdown.
+const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
+  const hour = Math.floor(i / 2);
+  const minute = i % 2 === 0 ? '00' : '30';
+  return `${String(hour).padStart(2, '0')}:${minute}`;
+});
+
+const DURATION_OPTIONS = [
+  { label: '30 min', minutes: 30 },
+  { label: '1 hour', minutes: 60 },
+  { label: '2 hours', minutes: 120 },
+  { label: '4 hours', minutes: 240 },
+  { label: '8 hours', minutes: 480 },
+];
+
+function formatTimeLabel(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h < 12 ? 'AM' : 'PM';
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
 // Combines a calendar date with an "HH:mm" string into a local-time
@@ -34,14 +53,6 @@ function combineDateAndTime(date: Date, hhmm: string): Date {
   return combined;
 }
 
-function formatDateTime(d: Date): string {
-  return (
-    d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
-    ' · ' +
-    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  );
-}
-
 export default function BookResourcePage() {
   const { bookableType, bookableId } = useParams<{ bookableType: string; bookableId: string }>();
   const router = useRouter();
@@ -52,23 +63,24 @@ export default function BookResourcePage() {
   const isSubmitting = useBookingStore((s) => s.isSubmitting);
   const error = useBookingStore((s) => s.error);
 
-  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [startSlot, setStartSlot] = useState<string | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
-  const [endSlot, setEndSlot] = useState<string | null>(null);
+  const [durationMinutes, setDurationMinutes] = useState<number | null>(null);
   const [conflict, setConflict] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const now = useMemo(() => new Date(), []);
 
-  const startDateTime = useMemo(
-    () => (startDate && startSlot ? combineDateAndTime(startDate, startSlot) : null),
-    [startDate, startSlot],
-  );
-  const endDateTime = useMemo(
-    () => (endDate && endSlot ? combineDateAndTime(endDate, endSlot) : null),
-    [endDate, endSlot],
-  );
+  // Derived start/end — the same values the old typed inputs used to
+  // produce, just built from clicks instead of keystrokes.
+  const { startDate, endDate } = useMemo(() => {
+    if (!selectedDate || !startSlot || durationMinutes === null) {
+      return { startDate: null as Date | null, endDate: null as Date | null };
+    }
+    const s = combineDateAndTime(selectedDate, startSlot);
+    const e = new Date(s.getTime() + durationMinutes * 60 * 1000);
+    return { startDate: s, endDate: e };
+  }, [selectedDate, startSlot, durationMinutes]);
 
   const getBookableIcon = () => {
     switch (bookableType?.toLowerCase()) {
@@ -81,53 +93,18 @@ export default function BookResourcePage() {
     }
   };
 
-  function handleSelectStartDate(date: Date) {
-    setStartDate(date);
-    // Changing the start date invalidates whatever start time and end
-    // date/time were picked before (the "must be after start" floor
-    // just moved) — clear all of it so the user re-confirms explicitly
-    // rather than silently keeping a now-invalid combination.
-    setStartSlot(null);
-    setEndDate(null);
-    setEndSlot(null);
-  }
-
-  function handleSelectStartSlot(slot: string) {
-    setStartSlot(slot);
-    setEndDate(null);
-    setEndSlot(null);
-  }
-
-  function handleSelectEndDate(date: Date) {
-    setEndDate(date);
-    setEndSlot(null);
-  }
-
-  const isStartSlotDisabled = (hhmm: string): boolean => {
-    if (!startDate) return true;
-    return combineDateAndTime(startDate, hhmm).getTime() < now.getTime();
-  };
-
-  // An end slot is disabled if it falls at or before the chosen start
-  // moment. On a later calendar day than the start, every slot is fair
-  // game (the date picker's own minDate already guarantees the end
-  // date can't be before the start date).
-  const isEndSlotDisabled = (hhmm: string): boolean => {
-    if (!endDate || !startDate || !startDateTime) return true;
-    const candidate = combineDateAndTime(endDate, hhmm);
-    if (isSameDay(endDate, startDate)) {
-      return candidate.getTime() <= startDateTime.getTime();
-    }
-    return false;
-  };
-
   function validateSelection(): boolean {
-    if (!startDateTime || !endDateTime) {
-      setValidationError('Pick a start date & time and an end date & time.');
+    if (!startDate || !endDate) {
+      setValidationError('Pick a date, start time, and duration.');
       return false;
     }
-    if (endDateTime.getTime() <= startDateTime.getTime()) {
-      setValidationError('End must be after start.');
+    if (startDate.getTime() < now.getTime()) {
+      setValidationError('That start time has already passed — pick a later slot.');
+      return false;
+    }
+    const duration = endDate.getTime() - startDate.getTime();
+    if (duration > 24 * 60 * 60 * 1000) {
+      setValidationError('Booking cannot exceed 24 hours.');
       return false;
     }
     setValidationError(null);
@@ -138,12 +115,12 @@ export default function BookResourcePage() {
     e.preventDefault();
     setConflict(false);
 
-    if (!validateSelection() || !startDateTime || !endDateTime) {
+    if (!validateSelection() || !startDate || !endDate) {
       return;
     }
 
     setDraftResource(bookableType.toUpperCase() as BookableType, bookableId);
-    setDraftTimes(startDateTime.toISOString(), endDateTime.toISOString());
+    setDraftTimes(startDate.toISOString(), endDate.toISOString());
 
     const success = await submitBooking();
 
@@ -156,6 +133,15 @@ export default function BookResourcePage() {
 
   const handleBack = () => {
     router.back();
+  };
+
+  // A start slot on today counts as "already passed" once its time is
+  // behind the current clock — greys it out in the grid below rather
+  // than letting someone pick it and only finding out on submit.
+  const isSlotDisabled = (hhmm: string): boolean => {
+    if (!selectedDate) return true;
+    const candidate = combineDateAndTime(selectedDate, hhmm);
+    return candidate.getTime() < now.getTime();
   };
 
   return (
@@ -181,72 +167,99 @@ export default function BookResourcePage() {
                   Book {bookableType}
                 </h1>
                 <p className="text-sm text-slate-400">
-                  Pick when this booking starts and ends
+                  Pick a date, a start time, and how long you need it
                 </p>
               </div>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="p-6 space-y-6">
-            {/* Start date */}
             <div>
               <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
                 <Calendar className="w-4 h-4 text-slate-400" />
-                Start date
+                Date
               </label>
-              <DateCalendar selected={startDate} onSelect={handleSelectStartDate} />
+              <DateCalendar
+                selected={selectedDate}
+                onSelect={(date) => {
+                  setSelectedDate(date);
+                  // Changing the date can un-disable or re-disable the
+                  // currently chosen start slot (e.g. "now" moved past
+                  // it) — clear it so the user re-confirms explicitly
+                  // rather than silently keeping a now-invalid pick.
+                  setStartSlot(null);
+                }}
+              />
             </div>
 
-            {/* Start time */}
-            {startDate && (
+            {selectedDate && (
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
                   <Clock className="w-4 h-4 text-slate-400" />
                   Start time
                 </label>
-                <TimeSlotPicker
-                  selected={startSlot}
-                  onSelect={handleSelectStartSlot}
-                  isDisabled={isStartSlotDisabled}
-                />
+                <div className="grid grid-cols-4 gap-1.5 max-h-56 overflow-y-auto border-2 border-slate-200 rounded-lg p-2">
+                  {TIME_SLOTS.map((slot) => {
+                    const disabled = isSlotDisabled(slot);
+                    const selected = startSlot === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => setStartSlot(slot)}
+                        className={`
+                          text-xs py-1.5 rounded transition-colors
+                          ${disabled ? 'text-slate-300 cursor-not-allowed' : 'text-slate-700 hover:bg-blue-50 cursor-pointer'}
+                          ${selected ? 'bg-blue-600 text-white hover:bg-blue-600 font-semibold' : ''}
+                        `}
+                      >
+                        {formatTimeLabel(slot)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {/* End date */}
-            {startDate && startSlot && (
-              <div>
-                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
-                  <Calendar className="w-4 h-4 text-slate-400" />
-                  End date
-                </label>
-                <DateCalendar
-                  selected={endDate}
-                  onSelect={handleSelectEndDate}
-                  minDate={startDate}
-                />
-              </div>
-            )}
-
-            {/* End time */}
-            {endDate && (
+            {selectedDate && startSlot && (
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
                   <Clock className="w-4 h-4 text-slate-400" />
-                  End time
+                  Duration
                 </label>
-                <TimeSlotPicker
-                  selected={endSlot}
-                  onSelect={setEndSlot}
-                  isDisabled={isEndSlotDisabled}
-                />
+                <div className="flex flex-wrap gap-2">
+                  {DURATION_OPTIONS.map((opt) => {
+                    const selected = durationMinutes === opt.minutes;
+                    return (
+                      <button
+                        key={opt.minutes}
+                        type="button"
+                        onClick={() => setDurationMinutes(opt.minutes)}
+                        className={`
+                          px-3 py-1.5 rounded-full text-xs font-medium border-2 transition-colors
+                          ${selected
+                            ? 'bg-blue-600 border-blue-600 text-white'
+                            : 'border-slate-200 text-slate-600 hover:border-blue-300'}
+                        `}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {startDateTime && endDateTime && (
+            {startDate && endDate && (
               <div className="flex items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
                 <CheckCircle2 className="w-4 h-4 text-slate-500 shrink-0" />
                 <span>
-                  {formatDateTime(startDateTime)} &nbsp;→&nbsp; {formatDateTime(endDateTime)}
+                  {startDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                  {' · '}
+                  {startDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  {' – '}
+                  {endDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
                 </span>
               </div>
             )}
@@ -272,9 +285,16 @@ export default function BookResourcePage() {
               </div>
             )}
 
+            <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-blue-700">
+                Maximum booking duration is 24 hours.
+              </p>
+            </div>
+
             <button
               type="submit"
-              disabled={isSubmitting || !startDateTime || !endDateTime}
+              disabled={isSubmitting || !startDate || !endDate}
               className="w-full inline-flex items-center justify-center gap-2 bg-slate-900 
                        text-white rounded-lg px-4 py-3 text-sm font-medium 
                        hover:bg-slate-800 transition-all disabled:opacity-50 

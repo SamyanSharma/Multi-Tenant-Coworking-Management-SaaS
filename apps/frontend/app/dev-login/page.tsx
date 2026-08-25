@@ -15,28 +15,12 @@ import {
   Crown
 } from 'lucide-react';
 
-// DEV-ONLY TOOL — remove this whole page before the final/production
-// build (see MASTER_PROMPT.md / PROGRESS.md). These IDs are NOT
-// arbitrary: they must match the fixed DEV_SPACE_ID / DEV_MANAGER_ID /
-// DEV_MEMBER_ID constants pinned in `apps/backend/prisma/seed.ts`. If
-// you change one, change the other — a mismatch here silently sets
-// stale auth state (401/404 on the first real API call, no visible
-// error), which is exactly the bug this pinning was added to prevent.
-//
-// MUST also satisfy TenantGuard's CUID_REGEX (/^c[a-z0-9]{20,}$/i) —
-// the original 'devseed_space_...' values didn't (wrong first letter +
-// underscores), causing a 400 "x-space-id is not a valid id" on every
-// request. Fixed 2026-08-25 to match seed.ts — see PROGRESS.md.
 const SPACE_ID = 'cdevseedspace00000000001';
 
 const USERS = [
   {
     label: 'Platform Admin',
     role: 'PLATFORM_ADMIN' as const,
-    // PLATFORM_ADMIN is never scoped to a space — spaceId stays null.
-    // GET /spaces (the route this role actually calls) is marked
-    // @SkipTenantCheck() specifically so a null/missing x-space-id
-    // header is fine here; every other role below needs a real one.
     spaceId: null as string | null,
     userId: null as string | null,
     description: 'Full system access across all spaces',
@@ -72,8 +56,6 @@ export default function DevLoginPage() {
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Safety net in case this page isn't deleted before a real deploy —
-  // see the removal note above. Doesn't replace deleting the page.
   if (process.env.NODE_ENV === 'production') {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 text-center">
@@ -86,9 +68,6 @@ export default function DevLoginPage() {
 
   async function loginAs(user: typeof USERS[number]) {
     setStatus('loading');
-    // Keyed on role, not userId — PLATFORM_ADMIN's userId is null, and
-    // comparing against null would make it look pre-selected before
-    // anything was ever clicked (selectedUser also starts out null).
     setSelectedUser(user.role);
     setError(null);
 

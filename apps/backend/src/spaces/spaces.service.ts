@@ -6,12 +6,10 @@ import { CreateSpaceDto } from './dto/create-space.dto';
 export class SpacesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // Platform_Admin only (RBAC table: "View all spaces") — unscoped, sees everything.
   findAll() {
     return this.prisma.space.findMany();
   }
 
-  // Space manager only (RBAC table: "View own space")
   async findOwnSpace(spaceId: string) {
   const space = await this.prisma.space.findUnique({
     where: { id: spaceId },

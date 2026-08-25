@@ -6,9 +6,6 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 interface DateCalendarProps {
   selected: Date | null;
   onSelect: (date: Date) => void;
-  // Dates strictly before this (compared by day, not time) are shown
-  // disabled and can't be clicked. Defaults to "today" — bookings can't
-  // be made for a day that's already passed.
   minDate?: Date;
 }
 
@@ -44,8 +41,6 @@ export default function DateCalendar({ selected, onSelect, minDate }: DateCalend
   const firstWeekday = firstOfMonth.getDay(); // 0 = Sunday
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // Don't let the user navigate to a month entirely before the floor
-  // month — nothing in it would be clickable anyway.
   const canGoPrev =
     year > floor.getFullYear() ||
     (year === floor.getFullYear() && month > floor.getMonth());

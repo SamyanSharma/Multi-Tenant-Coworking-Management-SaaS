@@ -20,9 +20,6 @@ import { UpdateSpacePriceDto } from './dto/update-space-price.dto';
 export class SpacesController {
   constructor(private readonly spacesService: SpacesService) {}
 
-  /**
-   * Platform admin can view all spaces.
-   */
   @UseGuards(RbacGuard)
   @Roles(Role.PLATFORM_ADMIN)
   @SkipTenantCheck()
@@ -50,7 +47,6 @@ export class SpacesController {
     return this.spacesService.findOwnSpace(id);
   }
 
-// Platform admin can create a new space.
   @UseGuards(RbacGuard)
   @Roles(Role.PLATFORM_ADMIN)
   @Post()
@@ -58,7 +54,6 @@ export class SpacesController {
     return this.spacesService.create(dto);
   }
 
-  // Space manager can update the price of their own space.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post('me/price')
