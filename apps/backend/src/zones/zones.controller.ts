@@ -18,7 +18,6 @@ import { Roles, Role } from '../auth/roles.decorator';
 export class ZonesController {
   constructor(private readonly zonesService: ZonesService) {}
 
-  // Space_Manager AND Member can view zones in their own space.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
@@ -36,7 +35,6 @@ export class ZonesController {
     return this.zonesService.findOne(id, req.spaceId!);
   }
 
-  // Only Space_Manager can create zones.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post()
@@ -50,7 +48,6 @@ export class ZonesController {
     );
   }
 
-  // Only Space_Manager can edit zones.
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Patch(':id')

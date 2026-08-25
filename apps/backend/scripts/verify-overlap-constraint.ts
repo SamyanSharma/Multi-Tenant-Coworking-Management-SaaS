@@ -1,29 +1,4 @@
-/**
- * verify-overlap-constraint.ts
- *
- * Standalone check for PROGRESS.md's open item: does the
- * `no_overlapping_bookings` Postgres EXCLUDE constraint actually reject
- * a genuine time-range overlap, and does the error Prisma throws match
- * what bookings.service.ts's catch block looks for (23P01 or
- * "no_overlapping_bookings" in the message)?
- *
- * This talks to Prisma directly — no NestJS app, no Stripe, no HTTP —
- * so it isolates the ONE thing that's actually unverified instead of
- * requiring a full Stripe Connect onboarding flow just to test a DB
- * constraint.
- *
- * Run from apps/backend, AFTER `npx prisma generate` and
- * `npx prisma migrate deploy` have both succeeded:
- *
- *   npx ts-node verify-overlap-constraint.ts
- *
- * (If ts-node isn't installed: npm install --save-dev ts-node)
- *
- * Safe to run repeatedly — it creates its own throwaway Space/Zone/Desk/
- * User rows each time and never touches your real data.
- */
-
-import 'dotenv/config'; // loads apps/backend/.env — same as main.ts does for the real app
+import 'dotenv/config';
 
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -54,8 +29,7 @@ async function main() {
   console.log(`Desk: ${desk.id}`);
 
   const first = { startTime: new Date('2026-09-01T09:00:00Z'), endTime: new Date('2026-09-01T11:00:00Z') };
-  const second = { startTime: new Date('2026-09-01T10:00:00Z'), endTime: new Date('2026-09-01T12:00:00Z') }; // genuinely overlaps, different startTime
-
+  const second = { startTime: new Date('2026-09-01T10:00:00Z'), endTime: new Date('2026-09-01T12:00:00Z') }; 
   console.log('\nCreating first booking (9:00-11:00)...');
   const booking1 = await prisma.booking.create({
     data: { bookableType: 'DESK', bookableId: desk.id, userId: user.id, ...first },

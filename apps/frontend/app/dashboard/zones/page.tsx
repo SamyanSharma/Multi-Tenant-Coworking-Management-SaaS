@@ -107,7 +107,6 @@ export default function ZonesListPage() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-blue-50 rounded-lg">
@@ -147,7 +146,6 @@ export default function ZonesListPage() {
         </div>
       </div>
 
-      {/* Search */}
       <div className="relative max-w-md">
         <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
@@ -161,7 +159,6 @@ export default function ZonesListPage() {
         />
       </div>
 
-      {/* Zones Grid */}
       {filteredZones.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16">
           <div className="p-4 bg-slate-100 rounded-full mb-4">
@@ -192,7 +189,6 @@ export default function ZonesListPage() {
                        hover:border-blue-500 hover:shadow-lg transition-all duration-200 
                        overflow-hidden"
             >
-              {/* Zone Header */}
               <div className="p-6 bg-gradient-to-br from-slate-50 to-white border-b border-slate-100">
                 <div className="flex items-start justify-between mb-4">
                   <div className="p-3 bg-blue-50 rounded-lg group-hover:bg-blue-100 
@@ -210,7 +206,6 @@ export default function ZonesListPage() {
                 <p className="text-xs text-slate-500">Zone ID: {zone.id.slice(0, 8)}...</p>
               </div>
 
-              {/* Zone Stats */}
               <div className="px-6 py-4">
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div>
@@ -231,7 +226,6 @@ export default function ZonesListPage() {
                 </div>
               </div>
 
-              {/* Footer */}
               <div className="px-6 py-3 bg-slate-50 flex items-center justify-between">
                 <div className="flex items-center gap-1 text-xs text-slate-500">
                   <Activity className="w-3 h-3 text-green-500" />

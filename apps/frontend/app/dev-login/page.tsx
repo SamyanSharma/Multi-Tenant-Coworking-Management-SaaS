@@ -11,23 +11,27 @@ import {
   Loader2, 
   AlertCircle,
   CheckCircle2,
-  Terminal
+  Terminal,
+  Crown
 } from 'lucide-react';
 
-// DEV-ONLY TOOL — remove this whole page before the final/production
-// build (see MASTER_PROMPT.md / PROGRESS.md). These IDs are NOT
-// arbitrary: they must match the fixed DEV_SPACE_ID / DEV_MANAGER_ID /
-// DEV_MEMBER_ID constants pinned in `apps/backend/prisma/seed.ts`. If
-// you change one, change the other — a mismatch here silently sets
-// stale auth state (401/404 on the first real API call, no visible
-// error), which is exactly the bug this pinning was added to prevent.
-const SPACE_ID = 'devseed_space_0000000001';
+const SPACE_ID = 'cdevseedspace00000000001';
 
 const USERS = [
+  {
+    label: 'Platform Admin',
+    role: 'PLATFORM_ADMIN' as const,
+    spaceId: null as string | null,
+    userId: null as string | null,
+    description: 'Full system access across all spaces',
+    icon: Crown,
+    accentColor: 'purple',
+  },
   { 
     label: 'Space Manager', 
     role: 'SPACE_MANAGER' as const, 
-    userId: 'devseed_user_manager_001',
+    spaceId: SPACE_ID as string | null,
+    userId: 'cdevseedmanager0000000001' as string | null,
     description: 'Full access to manage spaces, members, and settings',
     icon: Shield,
     accentColor: 'blue'
@@ -35,7 +39,8 @@ const USERS = [
   { 
     label: 'Member', 
     role: 'MEMBER' as const, 
-    userId: 'devseed_user_member_0001',
+    spaceId: SPACE_ID as string | null,
+    userId: 'cdevseedmember00000000001' as string | null,
     description: 'Standard access to view and interact with spaces',
     icon: User,
     accentColor: 'green'
@@ -51,8 +56,6 @@ export default function DevLoginPage() {
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Safety net in case this page isn't deleted before a real deploy —
-  // see the removal note above. Doesn't replace deleting the page.
   if (process.env.NODE_ENV === 'production') {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 text-center">
@@ -65,7 +68,7 @@ export default function DevLoginPage() {
 
   async function loginAs(user: typeof USERS[number]) {
     setStatus('loading');
-    setSelectedUser(user.userId);
+    setSelectedUser(user.role);
     setError(null);
 
     try {
@@ -74,7 +77,7 @@ export default function DevLoginPage() {
       setAuth({
         token: 'dummy',
         role: user.role,
-        spaceId: SPACE_ID,
+        spaceId: user.spaceId,
         userId: user.userId,
       });
 
@@ -125,13 +128,13 @@ export default function DevLoginPage() {
             <div className="space-y-3">
               {USERS.map((user) => {
                 const Icon = user.icon;
-                const isSelected = selectedUser === user.userId;
+                const isSelected = selectedUser === user.role;
                 const isLoading = isSelected && status === 'loading';
                 const isSuccess = isSelected && status === 'success';
 
                 return (
                   <button
-                    key={user.userId}
+                    key={user.role}
                     onClick={() => loginAs(user)}
                     disabled={status === 'loading'}
                     className={`
@@ -147,11 +150,13 @@ export default function DevLoginPage() {
                     <div className="flex items-center gap-3">
                       <div className={`
                         p-2 rounded-lg shrink-0
-                        ${user.accentColor === 'blue' ? 'bg-blue-100' : 'bg-green-100'}
+                        ${user.accentColor === 'purple' ? 'bg-purple-100' :
+                          user.accentColor === 'blue' ? 'bg-blue-100' : 'bg-green-100'}
                       `}>
                         <Icon className={`
                           w-5 h-5
-                          ${user.accentColor === 'blue' ? 'text-blue-600' : 'text-green-600'}
+                          ${user.accentColor === 'purple' ? 'text-purple-600' :
+                            user.accentColor === 'blue' ? 'text-blue-600' : 'text-green-600'}
                         `} />
                       </div>
                       
@@ -162,7 +167,9 @@ export default function DevLoginPage() {
                           </h3>
                           <span className={`
                             px-2 py-0.5 rounded-full text-xs font-medium
-                            ${user.role === 'SPACE_MANAGER' 
+                            ${user.role === 'PLATFORM_ADMIN'
+                              ? 'bg-purple-100 text-purple-700'
+                              : user.role === 'SPACE_MANAGER' 
                               ? 'bg-blue-100 text-blue-700' 
                               : 'bg-green-100 text-green-700'
                             }

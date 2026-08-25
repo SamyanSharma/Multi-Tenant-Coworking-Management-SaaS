@@ -19,7 +19,6 @@ export class PaymentsController {
     private readonly prisma: PrismaService,
   ) {}
 
- // Endpoint for onboarding a Space Manager to Stripe Connect.
   @Roles(Role.SPACE_MANAGER)
   @Post('onboard')
   async onboard(@Req() req: Request) {
@@ -34,7 +33,6 @@ export class PaymentsController {
       throw new BadRequestException('Missing spaceId');
     }
 
-   // Verify the user is a Space Manager in this space before proceeding.
     const user = await this.prisma.user.findFirst({
       where: {
         id: userId,
@@ -49,7 +47,6 @@ export class PaymentsController {
       );
     }
 
-    // Create or retrieve the Stripe Connect account for this user.
     const accountId =
       await this.stripeService.createOrGetConnectAccount({
         id: user.id,
@@ -57,7 +54,6 @@ export class PaymentsController {
         stripeAccountId: user.stripeAccountId,
       });
 
-    // If the user didn't have a Stripe account ID, update it in the database.
     if (!user.stripeAccountId) {
       await this.prisma.user.update({
         where: { id: user.id },
@@ -67,7 +63,6 @@ export class PaymentsController {
       });
     }
 
-    // Generate the onboarding link for the Stripe Connect account.
     const frontendUrl =
       process.env.FRONTEND_URL ?? 'http://localhost:3001';
 

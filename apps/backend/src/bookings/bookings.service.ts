@@ -193,13 +193,6 @@ export class BookingsService {
 
     try {
 
-      /*
-        Booking is created first.
-
-        Payment is a separate step.
-        This allows booking creation even when
-        Stripe Connect is not configured.
-      */
 
       const booking =
         await this.prisma.$transaction(
@@ -225,15 +218,6 @@ export class BookingsService {
       let updatedBooking = booking;
 
 
-
-      /*
-        Future Stripe flow:
-
-        If Space Manager completed Stripe onboarding,
-        create PaymentIntent and attach it.
-
-        Otherwise keep booking without payment.
-      */
 
       if (
         spaceManager.stripeAccountId &&

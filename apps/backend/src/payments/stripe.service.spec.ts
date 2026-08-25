@@ -18,7 +18,6 @@ describe('StripeService.calculateFeeSplit', () => {
   });
 
   it('always sums back to the original amount, even with rounding', () => {
-    // 5% of 101 cents = 5.05, which rounds to 5 cents.
     const amount = 101;
     const { platformFeeCents, managerAmountCents } =
       service.calculateFeeSplit(amount);
@@ -26,7 +25,7 @@ describe('StripeService.calculateFeeSplit', () => {
   });
 
   it('handles a small amount without going negative or losing cents', () => {
-    const amount = 3; // 3 cents * 5% = 0.15 -> rounds to 0
+    const amount = 3;
     const { platformFeeCents, managerAmountCents } =
       service.calculateFeeSplit(amount);
     expect(platformFeeCents).toBe(0);

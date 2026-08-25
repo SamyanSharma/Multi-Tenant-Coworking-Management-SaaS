@@ -1,10 +1,8 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import Stripe from 'stripe';
 
-// Platform's cut of every booking payment (5%).
 const PLATFORM_FEE_PERCENT = 5;
 
-// Stripe Accounts v2 preview API version.
 const STRIPE_ACCOUNTS_V2_API_VERSION = '2026-01-28.preview';
 
 @Injectable()
@@ -95,9 +93,6 @@ export class StripeService {
     });
   }
 
-  /**
-   * Verifies a Stripe webhook payload's signature.
-   */
   constructWebhookEvent(
     rawBody: Buffer,
     signature: string,
@@ -124,7 +119,6 @@ export class StripeService {
     email: string;
     stripeAccountId: string | null;
   }): Promise<string> {
-    // Reuse an existing connected account.
     if (user.stripeAccountId) {
       return user.stripeAccountId;
     }

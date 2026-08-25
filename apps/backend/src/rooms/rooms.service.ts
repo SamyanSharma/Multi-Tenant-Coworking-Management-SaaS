@@ -28,8 +28,6 @@ export class RoomsService {
   }
 
   async create(dto: CreateRoomDto, spaceId: string) {
-    // Same parent-ownership check as DesksService.create — verify the
-    // target zone belongs to the caller's space before writing into it.
     const zone = await this.prisma.zone.findUnique({
       where: { id: dto.zoneId },
     });
