@@ -20,7 +20,8 @@ function spaceRoom(spaceId: string): string {
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: process.env.FRONTEND_URL ?? 'http://localhost:3001',
+    credentials: true,
   },
 })
 export class EventsGateway
