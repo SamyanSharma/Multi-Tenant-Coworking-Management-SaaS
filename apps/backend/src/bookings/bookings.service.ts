@@ -13,6 +13,8 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { StripeService } from '../payments/stripe.service';
 
 const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
+const PRISMA_EXCLUSION_CONSTRAINT_VIOLATION = 'P2039';
+const POSTGRES_EXCLUSION_VIOLATION = '23P01';
 
 @Injectable()
 export class BookingsService {
@@ -291,42 +293,27 @@ export class BookingsService {
 
 
 
-    } catch (err: unknown) {
+       } catch (err: unknown) {
 
-
-      if (
+      const isUniqueViolation =
         err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code ===
-          PRISMA_UNIQUE_CONSTRAINT_VIOLATION
-      ) {
+        err.code === PRISMA_UNIQUE_CONSTRAINT_VIOLATION;
 
+      const isExclusionViolation =
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        (
+          err.code === PRISMA_EXCLUSION_CONSTRAINT_VIOLATION ||
+          (err as any).meta?.code ===
+            POSTGRES_EXCLUSION_VIOLATION ||
+          (err as any).meta?.driverAdapterError?.cause
+            ?.originalCode === POSTGRES_EXCLUSION_VIOLATION
+        );
+
+      if (isUniqueViolation || isExclusionViolation) {
         throw new ConflictException(
           'This slot is already booked.',
         );
-
       }
-
-
-
-      const overlapError =
-        (
-          err instanceof Prisma.PrismaClientUnknownRequestError ||
-          err instanceof Prisma.PrismaClientKnownRequestError
-        ) &&
-        /23P01|no_overlapping_bookings/.test(
-          (err as any).message ?? '',
-        );
-
-
-
-      if (overlapError) {
-
-        throw new ConflictException(
-          'This slot overlaps with existing booking.',
-        );
-
-      }
-
 
       throw err;
     }
