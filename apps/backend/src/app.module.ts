@@ -3,6 +3,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { TenantGuard } from './auth/tenant.guard';
 import { SpacesModule } from './spaces/spaces.module';
 import { ZonesModule } from './zones/zones.module';
@@ -16,6 +18,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 @Module({
   imports: [
     PrismaModule,
+    AuthModule,
     SpacesModule,
     ZonesModule,
     DesksModule,
@@ -28,6 +31,13 @@ import { AnalyticsModule } from './analytics/analytics.module';
   controllers: [AppController],
   providers: [
     AppService,
+    // Order matters: Nest runs global guards in registration order.
+    // JwtAuthGuard MUST run before TenantGuard/RbacGuard, since both
+    // of those now read req.user, which only JwtAuthGuard sets.
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: TenantGuard,

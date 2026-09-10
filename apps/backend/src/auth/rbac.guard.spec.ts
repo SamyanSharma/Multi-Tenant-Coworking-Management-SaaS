@@ -4,8 +4,10 @@ import { Role } from '@prisma/client';
 import { RbacGuard } from './rbac.guard';
 
 describe('RbacGuard', () => {
-  function mockContext(headers: Record<string, string>): ExecutionContext {
-    const request = { headers };
+  function mockContext(
+    user: { id: string; role: Role } | undefined,
+  ): ExecutionContext {
+    const request = { user };
     return {
       switchToHttp: () => ({ getRequest: () => request }),
       getHandler: () => ({}),
@@ -22,38 +24,25 @@ describe('RbacGuard', () => {
 
   it('allows the request through when the route has no @Roles() at all', () => {
     const guard = guardWithRequiredRoles(undefined);
-    const ctx = mockContext({});
+    const ctx = mockContext(undefined);
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
-  it('throws when x-user-role header is missing', () => {
+  it('throws when there is no req.user at all (JwtAuthGuard should have run first)', () => {
     const guard = guardWithRequiredRoles([Role.PLATFORM_ADMIN]);
-    const ctx = mockContext({});
-    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
-  });
-
-  it('throws when x-user-role is not a recognized role', () => {
-    const guard = guardWithRequiredRoles([Role.PLATFORM_ADMIN]);
-    const ctx = mockContext({ 'x-user-role': 'SUPER_ADMIN' });
+    const ctx = mockContext(undefined);
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
   it('throws when the caller role is not in the required list', () => {
     const guard = guardWithRequiredRoles([Role.PLATFORM_ADMIN]);
-    const ctx = mockContext({ 'x-user-role': Role.MEMBER });
+    const ctx = mockContext({ id: 'user-1', role: Role.MEMBER });
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
-  it('allows and attaches userRole when the caller role matches', () => {
+  it('allows when the caller role matches', () => {
     const guard = guardWithRequiredRoles([Role.SPACE_MANAGER, Role.MEMBER]);
-    const request = { headers: { 'x-user-role': Role.MEMBER } };
-    const ctx = {
-      switchToHttp: () => ({ getRequest: () => request }),
-      getHandler: () => ({}),
-      getClass: () => ({}),
-    } as unknown as ExecutionContext;
-
+    const ctx = mockContext({ id: 'user-1', role: Role.MEMBER });
     expect(guard.canActivate(ctx)).toBe(true);
-    expect((request as any).userRole).toBe(Role.MEMBER);
   });
 });

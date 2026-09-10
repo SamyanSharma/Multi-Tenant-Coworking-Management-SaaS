@@ -22,11 +22,11 @@ export class PaymentsController {
   @Roles(Role.SPACE_MANAGER)
   @Post('onboard')
   async onboard(@Req() req: Request) {
-    const userId = req.headers['x-user-id'] as string | undefined;
+    const userId = req.user?.id;
     const spaceId = req.spaceId;
 
     if (!userId) {
-      throw new BadRequestException('Missing x-user-id header');
+      throw new BadRequestException('No authenticated user on request');
     }
 
     if (!spaceId) {

@@ -1,6 +1,13 @@
 import 'dotenv/config';
 import { PrismaClient, Role } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import * as bcrypt from 'bcryptjs';
+
+// Dev-only shared password for every seeded user. Fine for a local/demo
+// DB seeded from this script; never used for anything real. Printed at
+// the end of main() so it doesn't need to be remembered/documented
+// separately from the seed data it belongs to.
+const DEV_PASSWORD = 'password123';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -33,8 +40,27 @@ const prisma = new PrismaClient({ adapter });
 const DEV_SPACE_ID = 'cdevseedspace00000000001';
 const DEV_MANAGER_ID = 'cdevseedmanager0000000001';
 const DEV_MEMBER_ID = 'cdevseedmember00000000001';
+const DEV_ADMIN_ID = 'cdevseedadmin000000000001';
 
 async function main() {
+  // Hashed once and reused for every seeded user — real auth means
+  // dev-login's old role-switcher is retired in favor of actually
+  // logging in via POST /auth/login with these credentials.
+  const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
+
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@platform.dev' },
+    update: { role: Role.PLATFORM_ADMIN, password: passwordHash },
+    create: {
+      id: DEV_ADMIN_ID,
+      email: 'admin@platform.dev',
+      name: 'Test Platform Admin',
+      role: Role.PLATFORM_ADMIN,
+      password: passwordHash,
+      // Deliberately no spaceId — PLATFORM_ADMIN isn't scoped to one.
+    },
+  });
+
   const space = await prisma.space.upsert({
     where: { slug: 'test-space' },
     update: {},
@@ -48,25 +74,27 @@ async function main() {
 
   const manager = await prisma.user.upsert({
     where: { email: 'manager@test-space.dev' },
-    update: { spaceId: space.id, role: Role.SPACE_MANAGER },
+    update: { spaceId: space.id, role: Role.SPACE_MANAGER, password: passwordHash },
     create: {
       id: DEV_MANAGER_ID,
       email: 'manager@test-space.dev',
       name: 'Test Space Manager',
       role: Role.SPACE_MANAGER,
       spaceId: space.id,
+      password: passwordHash,
     },
   });
 
   const member = await prisma.user.upsert({
     where: { email: 'member@test-space.dev' },
-    update: { spaceId: space.id, role: Role.MEMBER },
+    update: { spaceId: space.id, role: Role.MEMBER, password: passwordHash },
     create: {
       id: DEV_MEMBER_ID,
       email: 'member@test-space.dev',
       name: 'Test Member',
       role: Role.MEMBER,
       spaceId: space.id,
+      password: passwordHash,
     },
   });
 
@@ -100,10 +128,17 @@ async function main() {
   console.log('Seed complete:');
   console.log({
     spaceId: space.id,
+    adminId: admin.id,
     managerId: manager.id,
     memberId: member.id,
     zoneId: zone.id,
   });
+  console.log(
+    `\nDev login credentials (all use password "${DEV_PASSWORD}"):`,
+  );
+  console.log('  admin@platform.dev    (PLATFORM_ADMIN)');
+  console.log('  manager@test-space.dev (SPACE_MANAGER)');
+  console.log('  member@test-space.dev  (MEMBER)');
 }
 
 main()

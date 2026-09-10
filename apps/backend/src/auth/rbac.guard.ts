@@ -9,7 +9,9 @@ import type { Request } from 'express';
 import { Role } from '@prisma/client';
 import { ROLES_KEY } from './roles.decorator';
 
-
+// Runs AFTER JwtAuthGuard, same as TenantGuard — reads the role off
+// req.user (verified from the JWT) instead of the old x-user-role
+// header, which any caller could previously set to anything.
 @Injectable()
 export class RbacGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -26,18 +28,13 @@ export class RbacGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<Request>();
-    const roleHeader = request.headers['x-user-role'];
+    const userRole = request.user?.role;
 
-    if (!roleHeader || Array.isArray(roleHeader)) {
-      throw new ForbiddenException('Missing or invalid x-user-role header');
+    if (!userRole) {
+      // Unreachable in practice — JwtAuthGuard always runs first and
+      // throws before this guard if there's no valid token.
+      throw new ForbiddenException('No authenticated user on request');
     }
-
-    if (!Object.values(Role).includes(roleHeader as Role)) {
-      throw new ForbiddenException(`Unknown role: ${roleHeader}`);
-    }
-
-    const userRole = roleHeader as Role;
-    request.userRole = userRole;
 
     if (!requiredRoles.includes(userRole)) {
       throw new ForbiddenException(

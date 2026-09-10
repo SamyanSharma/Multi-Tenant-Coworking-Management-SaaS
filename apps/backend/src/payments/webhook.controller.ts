@@ -13,6 +13,7 @@ import type Stripe from 'stripe';
 import { StripeService } from './stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
+import { Public } from '../auth/public.decorator';
 
 @Controller('payments')
 export class WebhookController {
@@ -23,6 +24,10 @@ export class WebhookController {
     private readonly prisma: PrismaService,
   ) {}
 
+  // Public: Stripe calls this directly with no JWT. Its
+  // stripe-signature header (verified below) is the actual auth
+  // mechanism here, not anything JwtAuthGuard checks.
+  @Public()
   @SkipTenantCheck()
   @HttpCode(200)
   @Post('webhook')
