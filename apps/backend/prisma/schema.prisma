@@ -116,6 +116,12 @@ model Booking {
 model User {
   id        String    @id @default(cuid())
   email     String    @unique
+  // Nullable rather than required: lets `prisma migrate deploy` apply
+  // cleanly against existing seeded rows before `seed.ts` (updated
+  // alongside this migration) reseeds them with real bcrypt hashes.
+  // AuthService.login() rejects any user with a null password rather
+  // than silently allowing passwordless login.
+  password  String?
   name      String?
   role      Role
   // Nullable: null for PLATFORM_ADMIN (not scoped to any space),

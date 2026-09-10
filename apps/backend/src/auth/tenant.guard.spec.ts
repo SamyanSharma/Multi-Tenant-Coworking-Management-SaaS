@@ -1,5 +1,6 @@
-import { ExecutionContext, BadRequestException } from '@nestjs/common';
+import { ExecutionContext, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Role } from '@prisma/client';
 import { TenantGuard } from './tenant.guard';
 
 describe('TenantGuard', () => {
@@ -11,15 +12,25 @@ describe('TenantGuard', () => {
     guard = new TenantGuard(reflector);
   });
 
-  // Builds a fake ExecutionContext so we don't need a real HTTP server
-  // just to test "does this guard read headers correctly."
-  function mockContext(headers: Record<string, string>): {
+  // Builds a fake ExecutionContext with req.user already set, the way
+  // JwtAuthGuard (which runs before TenantGuard in the real app) would
+  // have set it from a verified JWT.
+  function mockContext(
+    user: { id: string; role: Role; spaceId: string | null } | undefined,
+    headers: Record<string, string> = {},
+  ): {
     ctx: ExecutionContext;
-    request: { headers: Record<string, string>; spaceId?: string };
-  } {
-    const request: { headers: Record<string, string>; spaceId?: string } = {
-      headers,
+    request: {
+      headers: Record<string, string>;
+      user?: typeof user;
+      spaceId?: string;
     };
+  } {
+    const request: {
+      headers: Record<string, string>;
+      user?: typeof user;
+      spaceId?: string;
+    } = { headers, user };
     const ctx = {
       switchToHttp: () => ({ getRequest: () => request }),
       getHandler: () => ({}),
@@ -28,22 +39,55 @@ describe('TenantGuard', () => {
     return { ctx, request };
   }
 
-  it('throws when x-space-id header is missing', () => {
-    const { ctx } = mockContext({});
-    expect(() => guard.canActivate(ctx)).toThrow(BadRequestException);
+  it('throws when there is no req.user at all (JwtAuthGuard should have run first)', () => {
+    const { ctx } = mockContext(undefined);
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
-  it('throws when x-space-id is not a valid cuid shape', () => {
-    const { ctx } = mockContext({ 'x-space-id': 'not-a-real-id' });
-    expect(() => guard.canActivate(ctx)).toThrow(BadRequestException);
+  it('MEMBER/SPACE_MANAGER: scopes to their own JWT spaceId, ignoring any x-space-id header', () => {
+    const { ctx, request } = mockContext(
+      { id: 'user-1', role: Role.MEMBER, spaceId: 'cku8x2vwn0000abcd1234efgh' },
+      { 'x-space-id': 'ckSOMEOTHERSPACEaaaaaaaaaa' }, // attempted spoof
+    );
+
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(request.spaceId).toBe('cku8x2vwn0000abcd1234efgh');
   });
 
-  it('attaches spaceId to the request when valid', () => {
+  it('MEMBER/SPACE_MANAGER: throws if the JWT has no spaceId', () => {
+    const { ctx } = mockContext({ id: 'user-1', role: Role.MEMBER, spaceId: null });
+    expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
+  });
+
+  it('PLATFORM_ADMIN: passes through with no spaceId set when no x-space-id header is given', () => {
+    const { ctx, request } = mockContext({
+      id: 'admin-1',
+      role: Role.PLATFORM_ADMIN,
+      spaceId: null,
+    });
+
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(request.spaceId).toBeUndefined();
+  });
+
+  it('PLATFORM_ADMIN: honors a valid x-space-id header', () => {
     const validId = 'cku8x2vwn0000abcd1234efgh';
-    const { ctx, request } = mockContext({ 'x-space-id': validId });
+    const { ctx, request } = mockContext(
+      { id: 'admin-1', role: Role.PLATFORM_ADMIN, spaceId: null },
+      { 'x-space-id': validId },
+    );
 
     expect(guard.canActivate(ctx)).toBe(true);
     expect(request.spaceId).toBe(validId);
+  });
+
+  it('PLATFORM_ADMIN: throws on a malformed x-space-id header', () => {
+    const { ctx } = mockContext(
+      { id: 'admin-1', role: Role.PLATFORM_ADMIN, spaceId: null },
+      { 'x-space-id': 'not-a-real-id' },
+    );
+
+    expect(() => guard.canActivate(ctx)).toThrow(BadRequestException);
   });
 
   it('bypasses the check when @SkipTenantCheck() metadata is present', () => {
@@ -51,7 +95,7 @@ describe('TenantGuard', () => {
       getAllAndOverride: () => true,
     } as unknown as Reflector;
     const skipGuard = new TenantGuard(skipReflector);
-    const { ctx } = mockContext({}); // no header at all
+    const { ctx } = mockContext(undefined); // no user at all
     expect(skipGuard.canActivate(ctx)).toBe(true);
   });
 });

@@ -27,8 +27,13 @@ Features:
 spaces, zones, desks, rooms, bookings, payments, analytics
 - Multi-tenancy:
 Each request must have x-space-id header (unless the route is marked as tenantless), which scopes database queries to a particular space.
+- Authentication:
+`POST /auth/login` (email + password) returns a JWT. Send it as
+`Authorization: Bearer <token>` on every other request, and as
+`{ auth: { token } }` on the Socket.io handshake. Passwords are hashed
+with bcrypt; nothing about identity is trusted from request headers.
 - Access control:
-Endpoints are guarded by an `RbacGuard` and authorized using `@Roles()` decorator. Available roles: `PLATFORM_ADMIN`, `SPACE_MANAGER`, `MEMBER`.
+Endpoints are guarded by an `RbacGuard` and authorized using `@Roles()` decorator, reading the role off the verified JWT. Available roles: `PLATFORM_ADMIN`, `SPACE_MANAGER`, `MEMBER`.
 - Creating a booking:
 Desks and Rooms are polymorphically associated with Bookings via bookableType and bookableId columns. Overlapping bookings for the same desk or room are prevented at the DB level with a PostgreSQL exclusion constraint. Unique constraint on `resourceId` and `start` also prevent double-booking.
 
@@ -84,7 +89,11 @@ PORT=3000
 FRONTEND_URL=http://localhost:3001
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+JWT_SECRET=some-long-random-string
 ```
+`JWT_SECRET` signs/verifies auth tokens. The app falls back to an
+insecure dev default if unset, but refuses to boot with that fallback
+when `NODE_ENV=production` — always set a real value outside local dev.
 Frontend (apps/frontend/.env.local, see .env.local.example):
 ```
 NEXT_PUBLIC_API_URL=http://localhost:3000
@@ -113,8 +122,9 @@ cd apps/frontend && npm run test
 
 ## API conventions
 
-- Every request should include the `x-space-id` header identifying the space, unless the route does not require authentication (e.g. Stripe webhooks).
-- Every request to a protected routeshould include the `x-user-role` header specifying the user's role.
+- Every protected route requires `Authorization: Bearer <token>` from `POST /auth/login`, except routes marked `@Public()` (login itself, the health check, the Stripe webhook).
+- `SPACE_MANAGER`/`MEMBER` are scoped to the space in their own token automatically — they don't send `x-space-id` at all. `PLATFORM_ADMIN` isn't tied to one space, so it may still send `x-space-id` to target a specific one on routes that need it.
+- `x-user-role`/`x-user-id` headers no longer exist — role and user identity come from the verified token, not request headers.
 
 ## License
 

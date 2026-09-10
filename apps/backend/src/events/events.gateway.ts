@@ -5,7 +5,9 @@ import {
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import type { JwtPayload } from '../auth/auth.service';
 
 const CUID_REGEX = /^c[a-z0-9]{20,}$/i;
 
@@ -29,43 +31,65 @@ export class EventsGateway
 {
   private readonly logger = new Logger(EventsGateway.name);
 
+  constructor(private readonly jwtService: JwtService) {}
+
   @WebSocketServer()
   server!: Server;
 
+  // Previously trusted handshake.auth.spaceId/.role directly — any
+  // client could join any tenant's room just by claiming its id. Now
+  // the client sends a real JWT (handshake.auth.token, the same token
+  // from POST /auth/login) and spaceId/role come from verifying it,
+  // the same as JwtAuthGuard does for REST requests.
   handleConnection(client: Socket): void {
-    const spaceId =
-      client.handshake.auth?.spaceId as string | undefined;
+    const token = client.handshake.auth?.token as
+      | string
+      | undefined;
 
-    const role =
-      client.handshake.auth?.role as string | undefined;
+    if (!token) {
+      this.rejectConnection(client, 'Missing auth token');
+      return;
+    }
+
+    let payload: JwtPayload;
+
+    try {
+      payload = this.jwtService.verify<JwtPayload>(token);
+    } catch {
+      this.rejectConnection(client, 'Invalid or expired token');
+      return;
+    }
+
+    const { spaceId, role } = payload;
 
     if (
       !spaceId ||
       !CUID_REGEX.test(spaceId) ||
-      !role ||
       !ALLOWED_ROLES.includes(
         role as (typeof ALLOWED_ROLES)[number],
       )
     ) {
-      this.logger.warn(
-        `Rejecting socket ${client.id}: missing or invalid spaceId/role in handshake.auth`,
+      this.rejectConnection(
+        client,
+        'Token has no valid spaceId/role for a real-time connection',
       );
-
-      client.emit('connection_error', {
-        message:
-          'Missing or invalid spaceId or role — connection rejected',
-      });
-
-      client.disconnect(true);
       return;
     }
 
-    
     client.join(spaceRoom(spaceId));
 
     this.logger.log(
       `Socket ${client.id} joined ${spaceRoom(spaceId)} as ${role}`,
     );
+  }
+
+  private rejectConnection(client: Socket, message: string): void {
+    this.logger.warn(
+      `Rejecting socket ${client.id}: ${message}`,
+    );
+
+    client.emit('connection_error', { message });
+    client.disconnect(true);
   }
 
   handleDisconnect(client: Socket): void {
