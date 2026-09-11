@@ -4,10 +4,10 @@ import { persist } from 'zustand/middleware';
 export type Role = 'PLATFORM_ADMIN' | 'SPACE_MANAGER' | 'MEMBER';
 
 interface AuthState {
-  token: string | null;
+  token: string | null; // real JWT from POST /auth/login (2026-09-10)
   role: Role | null;
   spaceId: string | null; // null for PLATFORM_ADMIN, set for the other two roles
-  userId: string | null; // real User.id — required by POST /bookings' x-user-id header
+  userId: string | null; // real User.id, from the token's `sub` claim
 
   setAuth: (auth: {
     token: string;
@@ -45,6 +45,11 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'coworking-auth',
+      // Persisted to localStorage, same as this store did before real
+      // auth existed. Simplest option for a capstone demo, but note
+      // the tradeoff: unlike an httpOnly cookie, a token in
+      // localStorage is readable by any JS that runs on this origin
+      // (XSS risk). Fine here; flag if this app ever goes past a demo.
     },
   ),
 );
