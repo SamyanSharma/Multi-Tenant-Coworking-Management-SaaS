@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuthStore, Role } from '@/store/authStore';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
 import { useLiveBookingsStore, LiveBooking } from '@/store/liveBookingsStore';
@@ -26,8 +27,11 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const token = useAuthStore((state) => state.token);
   const role = useAuthStore((state) => state.role);
   const spaceId = useAuthStore((state) => state.spaceId);
+  const logout = useAuthStore((state) => state.logout);
+  const router = useRouter();
   const addBooking = useLiveBookingsStore((state) => state.addBooking);
 
   // One socket connection for the whole dashboard session, with the
@@ -41,10 +45,10 @@ export default function DashboardLayout({
   // listener for an event the backend never sends would just be dead
   // code that looks connected but silently never fires.
   useEffect(() => {
-    // A socket connection requires tenant identity. PLATFORM_ADMIN has
-    // no spaceId, and the gateway only allows SPACE_MANAGER/MEMBER roles
-    // to join a space room — connectSocket() itself no-ops in that case.
-    const socket = connectSocket({ spaceId, role });
+    // A socket connection requires a real token — connectSocket()
+    // itself no-ops if there's no token, spaceId, or role (e.g.
+    // PLATFORM_ADMIN, who the gateway doesn't allow to join a room).
+    const socket = connectSocket({ token, spaceId, role });
 
     if (!socket) {
       disconnectSocket();
@@ -85,7 +89,7 @@ export default function DashboardLayout({
       socket.off('booking_created', handleBookingCreated);
       disconnectSocket();
     };
-  }, [role, spaceId, addBooking]);
+  }, [token, role, spaceId, addBooking]);
 
   const visibleItems = NAV_ITEMS.filter(
     (item) => role && item.roles.includes(role),
@@ -113,6 +117,17 @@ export default function DashboardLayout({
                 {item.label}
               </Link>
             ))}
+
+            <button
+              onClick={() => {
+                logout();
+                disconnectSocket();
+                router.push('/dev-login');
+              }}
+              className="mt-auto px-3 py-2 rounded hover:bg-slate-700 text-sm text-left text-slate-400"
+            >
+              Sign out
+            </button>
           </>
         ) : (
           <div className="text-sm text-slate-400">

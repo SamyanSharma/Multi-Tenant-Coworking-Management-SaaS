@@ -6,15 +6,24 @@ import type { Role } from '@/store/authStore';
 let socket: Socket | null = null;
 
 interface ConnectParams {
+  token: string | null;
   spaceId: string | null;
   role: Role | null;
 }
 
-//.
-export function connectSocket({ spaceId, role }: ConnectParams): Socket | null {
-  // PLATFORM_ADMIN has no spaceId, and the gateway only allows
-  // SPACE_MANAGER/MEMBER anyway — don't bother connecting.
-  if (!spaceId || !role) {
+// Previously sent { spaceId, role } directly — the gateway trusted
+// whatever the client claimed. Now sends the real JWT and the gateway
+// verifies it itself (see events.gateway.ts, 2026-09-10), deriving
+// spaceId/role from the token instead of believing the client.
+export function connectSocket({
+  token,
+  spaceId,
+  role,
+}: ConnectParams): Socket | null {
+  // A socket connection requires tenant identity. PLATFORM_ADMIN has
+  // no spaceId, and the gateway only allows SPACE_MANAGER/MEMBER roles
+  // to join a space room — don't bother connecting otherwise.
+  if (!token || !spaceId || !role) {
     return null;
   }
 
@@ -23,7 +32,7 @@ export function connectSocket({ spaceId, role }: ConnectParams): Socket | null {
   }
 
   socket = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? 'http://localhost:3000', {
-    auth: { spaceId, role },
+    auth: { token },
     autoConnect: false,
   });
 
