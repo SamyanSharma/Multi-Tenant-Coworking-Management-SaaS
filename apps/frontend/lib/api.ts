@@ -25,6 +25,21 @@ export function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+// Nest's default ValidationPipe returns `message` as a string[] (one
+// entry per failed validation rule) — e.g. signing up with a short
+// password AND no space name gives two messages at once. Login/signup
+// errors (UnauthorizedException, ConflictException) return a plain
+// string. Handle both so the caller always gets one readable line.
+function extractErrorMessage(
+  data: { message?: string | string[] } | null,
+  fallback: string,
+): string {
+  if (!data?.message) return fallback;
+  return Array.isArray(data.message)
+    ? data.message.join(', ')
+    : data.message;
+}
+
 export interface LoginResult {
   accessToken: string;
   user: {
@@ -52,7 +67,33 @@ export async function login(
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
-    throw new Error(data?.message ?? `Login failed (${res.status})`);
+    throw new Error(extractErrorMessage(data, `Login failed (${res.status})`));
+  }
+
+  return data as LoginResult;
+}
+
+// Space Manager self-signup: POST /auth/signup creates a brand-new
+// Space plus its first user (always SPACE_MANAGER) and returns the
+// same shape as login() — the caller is logged straight in. There is
+// no self-serve MEMBER signup yet (joining an existing space); this
+// is manager-only, one-space-per-signup.
+export async function signup(
+  name: string,
+  email: string,
+  password: string,
+  spaceName: string,
+): Promise<LoginResult> {
+  const res = await fetch(`${API_URL}/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, email, password, spaceName }),
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Signup failed (${res.status})`));
   }
 
   return data as LoginResult;

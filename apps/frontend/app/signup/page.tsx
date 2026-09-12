@@ -1,0 +1,202 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useAuthStore } from '@/store/authStore';
+import { signup } from '@/lib/api';
+import {
+  Building2,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+  UserPlus,
+} from 'lucide-react';
+
+export default function SignupPage() {
+  const setAuth = useAuthStore((s) => s.setAuth);
+  const router = useRouter();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [spaceName, setSpaceName] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(
+    'idle',
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus('loading');
+    setError(null);
+
+    try {
+      const result = await signup(name, email, password, spaceName);
+
+      setAuth({
+        token: result.accessToken,
+        role: result.user.role,
+        spaceId: result.user.spaceId,
+        userId: result.user.id,
+      });
+
+      setStatus('success');
+      setTimeout(() => {
+        router.push('/dashboard/spaces');
+      }, 300);
+    } catch (err) {
+      setStatus('error');
+      setError(err instanceof Error ? err.message : 'Signup failed');
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+          <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-slate-700/50 rounded-lg">
+                <Building2 className="w-6 h-6 text-emerald-400" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-white">
+                  Create your space
+                </h1>
+                <p className="text-sm text-slate-400">
+                  Sign up as a Space Manager
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <div className="space-y-1">
+              <label
+                htmlFor="spaceName"
+                className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+              >
+                Space name
+              </label>
+              <input
+                id="spaceName"
+                type="text"
+                required
+                minLength={2}
+                value={spaceName}
+                onChange={(e) => setSpaceName(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Acme Coworking"
+              />
+              <p className="text-xs text-slate-400">
+                This creates a brand-new space with you as its manager.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="name"
+                className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+              >
+                Your name
+              </label>
+              <input
+                id="name"
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Jane Doe"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="email"
+                className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+              >
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="you@example.com"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="password"
+                className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+              >
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="At least 8 characters"
+              />
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+
+            {status === 'success' && (
+              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                <p className="text-sm text-green-700">
+                  Space created! Redirecting...
+                </p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={status === 'loading'}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              {status === 'loading' ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <UserPlus className="w-4 h-4" />
+              )}
+              Create space & sign up
+            </button>
+          </form>
+
+          <div className="px-6 pb-6 text-center">
+            <p className="text-sm text-slate-500">
+              Already have an account?{' '}
+              <Link
+                href="/dev-login"
+                className="text-slate-900 font-medium hover:underline"
+              >
+                Sign in
+              </Link>
+            </p>
+            <p className="text-xs text-slate-400 mt-2">
+              Joining an existing space as a Member? Ask your Space
+              Manager for a seeded account for now — self-serve Member
+              signup isn&apos;t built yet.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import { login } from '@/lib/api';
 import {
@@ -180,6 +181,16 @@ export default function LoginPage() {
               )}
               Sign in
             </button>
+
+            <p className="text-sm text-slate-500 text-center">
+              New space?{' '}
+              <Link
+                href="/signup"
+                className="text-slate-900 font-medium hover:underline"
+              >
+                Create one
+              </Link>
+            </p>
           </form>
 
           <div className="px-6 pb-6">

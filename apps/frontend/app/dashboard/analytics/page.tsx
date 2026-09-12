@@ -21,6 +21,11 @@ interface AnalyticsSummary {
   activeBookings: number;
   totalBookings: number;
   utilizationRate: number;
+  // null = not expressible as a % (e.g. zero bookings/revenue 30 days
+  // ago but some now) — show a neutral "New" badge instead of a
+  // fabricated number.
+  revenueChangePct: number | null;
+  totalBookingsChangePct: number | null;
 }
 
 function formatCurrency(cents: number): string {
@@ -37,6 +42,26 @@ function formatPercent(fraction: number): string {
     style: 'percent', 
     maximumFractionDigits: 1 
   }).format(fraction);
+}
+
+// Turns a real (or null) pct-change value into a badge. Previously
+// these badges were hardcoded literals ('+12.5%' etc.) that showed no
+// matter what the underlying number actually was.
+function formatTrend(pct: number | null): {
+  label: string;
+  direction: 'up' | 'down' | 'neutral';
+} {
+  if (pct === null) {
+    return { label: 'New', direction: 'neutral' };
+  }
+  if (pct === 0) {
+    return { label: 'No change', direction: 'neutral' };
+  }
+  const rounded = Math.round(pct * 10) / 10;
+  return {
+    label: `${rounded > 0 ? '+' : ''}${rounded}%`,
+    direction: rounded > 0 ? 'up' : 'down',
+  };
 }
 
 export default function AnalyticsPage() {
@@ -119,33 +144,40 @@ export default function AnalyticsPage() {
   const isHighUtilization = utilizationPercent >= 70;
   const isLowUtilization = utilizationPercent < 40;
 
+  const revenueTrend = formatTrend(summary.revenueChangePct);
+  const bookingsTrend = formatTrend(summary.totalBookingsChangePct);
+
   const cards = [
     {
       label: 'Total Revenue',
       value: formatCurrency(summary.totalRevenue),
       icon: DollarSign,
       accentColor: 'emerald',
-      trend: '+12.5%',
-      trendUp: true,
-      subtitle: 'vs last month'
+      trend: revenueTrend.label,
+      trendDirection: revenueTrend.direction,
+      subtitle: 'vs last 30 days'
     },
     {
       label: 'Active Bookings',
       value: summary.activeBookings.toLocaleString(),
       icon: CalendarCheck,
       accentColor: 'blue',
-      trend: '+8.2%',
-      trendUp: true,
-      subtitle: 'vs last month'
+      // No trend badge here: this is a live snapshot (bookings
+      // happening right now), not a period total — there's no
+      // meaningful "30 days ago" count to compare it to without
+      // storing historical snapshots, which this app doesn't do.
+      trend: null,
+      trendDirection: 'neutral' as const,
+      subtitle: 'Live snapshot'
     },
     {
       label: 'Total Bookings',
       value: summary.totalBookings.toLocaleString(),
       icon: CalendarClock,
       accentColor: 'purple',
-      trend: '+15.3%',
-      trendUp: true,
-      subtitle: 'vs last month'
+      trend: bookingsTrend.label,
+      trendDirection: bookingsTrend.direction,
+      subtitle: 'vs last 30 days'
     },
     {
       label: 'Utilization Rate',
@@ -153,7 +185,7 @@ export default function AnalyticsPage() {
       icon: TrendingUp,
       accentColor: isHighUtilization ? 'amber' : isLowUtilization ? 'red' : 'green',
       trend: isHighUtilization ? 'Optimal' : isLowUtilization ? 'Low' : 'Good',
-      trendUp: !isLowUtilization,
+      trendDirection: isLowUtilization ? ('down' as const) : ('up' as const),
       subtitle: isHighUtilization ? 'Great performance' : isLowUtilization ? 'Needs attention' : 'On track',
       showProgressBar: true,
       progressValue: utilizationPercent
@@ -218,15 +250,17 @@ export default function AnalyticsPage() {
                 
                 {card.trend && (
                   <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                    card.trendUp 
-                      ? 'bg-green-50 text-green-700' 
-                      : 'bg-red-50 text-red-700'
+                    card.trendDirection === 'up'
+                      ? 'bg-green-50 text-green-700'
+                      : card.trendDirection === 'down'
+                        ? 'bg-red-50 text-red-700'
+                        : 'bg-slate-100 text-slate-600'
                   }`}>
-                    {card.trendUp ? (
+                    {card.trendDirection === 'up' ? (
                       <ArrowUpRight className="w-3 h-3" />
-                    ) : (
+                    ) : card.trendDirection === 'down' ? (
                       <ArrowDownRight className="w-3 h-3" />
-                    )}
+                    ) : null}
                     {card.trend}
                   </div>
                 )}
