@@ -99,7 +99,7 @@ describe('login', () => {
 });
 
 describe('signup', () => {
-  it('posts name/email/password/spaceName and returns the parsed result', async () => {
+  it('posts a SPACE_MANAGER payload and returns the parsed result', async () => {
     const body = {
       accessToken: 'token-2',
       user: {
@@ -112,16 +112,51 @@ describe('signup', () => {
     };
     const fetchMock = mockFetchOnce(201, body);
 
-    const result = await signup('Ada', 'manager@acme.com', 'password123', 'Acme');
-
-    expect(result).toEqual(body);
-    const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(init.body)).toEqual({
+    const result = await signup({
+      role: 'SPACE_MANAGER',
       name: 'Ada',
       email: 'manager@acme.com',
       password: 'password123',
       spaceName: 'Acme',
     });
+
+    expect(result).toEqual(body);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      role: 'SPACE_MANAGER',
+      name: 'Ada',
+      email: 'manager@acme.com',
+      password: 'password123',
+      spaceName: 'Acme',
+    });
+  });
+
+  it('posts a MEMBER payload with spaceSlug instead of spaceName', async () => {
+    const body = {
+      accessToken: 'token-3',
+      user: {
+        id: 'u3',
+        email: 'bob@example.com',
+        name: 'Bob',
+        role: 'MEMBER',
+        spaceId: 'space-existing',
+      },
+    };
+    const fetchMock = mockFetchOnce(201, body);
+
+    const result = await signup({
+      role: 'MEMBER',
+      name: 'Bob',
+      email: 'bob@example.com',
+      password: 'password123',
+      spaceSlug: 'acme-coworking',
+    });
+
+    expect(result).toEqual(body);
+    const [, init] = fetchMock.mock.calls[0];
+    const sentBody = JSON.parse(init.body);
+    expect(sentBody.spaceSlug).toBe('acme-coworking');
+    expect(sentBody.spaceName).toBeUndefined();
   });
 
   it('throws with the backend conflict message when the email is taken', async () => {
@@ -130,7 +165,29 @@ describe('signup', () => {
     });
 
     await expect(
-      signup('Ada', 'manager@acme.com', 'password123', 'Acme'),
+      signup({
+        role: 'SPACE_MANAGER',
+        name: 'Ada',
+        email: 'manager@acme.com',
+        password: 'password123',
+        spaceName: 'Acme',
+      }),
     ).rejects.toThrow('An account with this email already exists');
+  });
+
+  it('throws with the backend not-found message for an unknown space slug', async () => {
+    mockFetchOnce(404, {
+      message: 'No space found with that join code',
+    });
+
+    await expect(
+      signup({
+        role: 'MEMBER',
+        name: 'Bob',
+        email: 'bob@example.com',
+        password: 'password123',
+        spaceSlug: 'does-not-exist',
+      }),
+    ).rejects.toThrow('No space found with that join code');
   });
 });

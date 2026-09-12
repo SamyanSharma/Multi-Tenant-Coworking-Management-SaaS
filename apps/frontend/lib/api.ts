@@ -73,21 +73,33 @@ export async function login(
   return data as LoginResult;
 }
 
-// Space Manager self-signup: POST /auth/signup creates a brand-new
-// Space plus its first user (always SPACE_MANAGER) and returns the
-// same shape as login() — the caller is logged straight in. There is
-// no self-serve MEMBER signup yet (joining an existing space); this
-// is manager-only, one-space-per-signup.
-export async function signup(
-  name: string,
-  email: string,
-  password: string,
-  spaceName: string,
-): Promise<LoginResult> {
+// Space Manager signup ("List my space") creates a brand-new Space
+// plus its first user. Member signup ("Rent a space") joins an
+// EXISTING space by its slug (shown to Space Managers on their
+// space's dashboard page as "/{slug}") instead of creating one.
+// Either way POST /auth/signup returns the same shape as login() —
+// the caller is logged straight in.
+export type SignupInput =
+  | {
+      role: 'SPACE_MANAGER';
+      name: string;
+      email: string;
+      password: string;
+      spaceName: string;
+    }
+  | {
+      role: 'MEMBER';
+      name: string;
+      email: string;
+      password: string;
+      spaceSlug: string;
+    };
+
+export async function signup(input: SignupInput): Promise<LoginResult> {
   const res = await fetch(`${API_URL}/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password, spaceName }),
+    body: JSON.stringify(input),
   });
 
   const data = await res.json().catch(() => null);

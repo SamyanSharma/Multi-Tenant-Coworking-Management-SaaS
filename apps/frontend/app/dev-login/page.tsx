@@ -183,7 +183,7 @@ export default function LoginPage() {
             </button>
 
             <p className="text-sm text-slate-500 text-center">
-              New space?{' '}
+              New here?{' '}
               <Link
                 href="/signup"
                 className="text-slate-900 font-medium hover:underline"

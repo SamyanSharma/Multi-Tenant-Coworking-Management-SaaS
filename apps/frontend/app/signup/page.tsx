@@ -11,16 +11,21 @@ import {
   AlertCircle,
   CheckCircle2,
   UserPlus,
+  KeyRound,
 } from 'lucide-react';
+
+type SignupMode = 'SPACE_MANAGER' | 'MEMBER';
 
 export default function SignupPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const router = useRouter();
 
+  const [mode, setMode] = useState<SignupMode>('SPACE_MANAGER');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [spaceName, setSpaceName] = useState('');
+  const [spaceSlug, setSpaceSlug] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(
     'idle',
   );
@@ -32,7 +37,10 @@ export default function SignupPage() {
     setError(null);
 
     try {
-      const result = await signup(name, email, password, spaceName);
+      const result =
+        mode === 'SPACE_MANAGER'
+          ? await signup({ role: 'SPACE_MANAGER', name, email, password, spaceName })
+          : await signup({ role: 'MEMBER', name, email, password, spaceSlug });
 
       setAuth({
         token: result.accessToken,
@@ -58,41 +66,94 @@ export default function SignupPage() {
           <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-slate-700/50 rounded-lg">
-                <Building2 className="w-6 h-6 text-emerald-400" />
+                {mode === 'SPACE_MANAGER' ? (
+                  <Building2 className="w-6 h-6 text-emerald-400" />
+                ) : (
+                  <KeyRound className="w-6 h-6 text-emerald-400" />
+                )}
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-white">
-                  Create your space
-                </h1>
+                <h1 className="text-2xl font-bold text-white">Sign up</h1>
                 <p className="text-sm text-slate-400">
-                  Sign up as a Space Manager
+                  {mode === 'SPACE_MANAGER'
+                    ? 'List your own coworking space'
+                    : 'Join a space someone else manages'}
                 </p>
               </div>
             </div>
           </div>
 
+          <div className="grid grid-cols-2 border-b border-slate-200">
+            <button
+              type="button"
+              onClick={() => setMode('SPACE_MANAGER')}
+              className={`py-3 text-sm font-medium transition-colors ${
+                mode === 'SPACE_MANAGER'
+                  ? 'text-slate-900 border-b-2 border-slate-900 bg-slate-50'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              List my space
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('MEMBER')}
+              className={`py-3 text-sm font-medium transition-colors ${
+                mode === 'MEMBER'
+                  ? 'text-slate-900 border-b-2 border-slate-900 bg-slate-50'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Rent a space
+            </button>
+          </div>
+
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
-            <div className="space-y-1">
-              <label
-                htmlFor="spaceName"
-                className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
-              >
-                Space name
-              </label>
-              <input
-                id="spaceName"
-                type="text"
-                required
-                minLength={2}
-                value={spaceName}
-                onChange={(e) => setSpaceName(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Acme Coworking"
-              />
-              <p className="text-xs text-slate-400">
-                This creates a brand-new space with you as its manager.
-              </p>
-            </div>
+            {mode === 'SPACE_MANAGER' ? (
+              <div className="space-y-1">
+                <label
+                  htmlFor="spaceName"
+                  className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+                >
+                  Space name
+                </label>
+                <input
+                  id="spaceName"
+                  type="text"
+                  required
+                  minLength={2}
+                  value={spaceName}
+                  onChange={(e) => setSpaceName(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Acme Coworking"
+                />
+                <p className="text-xs text-slate-500">
+                  This creates a brand-new space with you as its manager.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label
+                  htmlFor="spaceSlug"
+                  className="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+                >
+                  Space join code
+                </label>
+                <input
+                  id="spaceSlug"
+                  type="text"
+                  required
+                  value={spaceSlug}
+                  onChange={(e) => setSpaceSlug(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="acme-coworking"
+                />
+                <p className="text-xs text-slate-500">
+                  Ask your Space Manager for this — it&apos;s shown on
+                  their space&apos;s page (as &quot;/their-slug&quot;).
+                </p>
+              </div>
+            )}
 
             <div className="space-y-1">
               <label
@@ -107,7 +168,7 @@ export default function SignupPage() {
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Jane Doe"
               />
             </div>
@@ -125,7 +186,7 @@ export default function SignupPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="you@example.com"
               />
             </div>
@@ -144,7 +205,7 @@ export default function SignupPage() {
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="At least 8 characters"
               />
             </div>
@@ -160,7 +221,9 @@ export default function SignupPage() {
               <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
                 <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
                 <p className="text-sm text-green-700">
-                  Space created! Redirecting...
+                  {mode === 'SPACE_MANAGER'
+                    ? 'Space created! Redirecting...'
+                    : "You're in! Redirecting..."}
                 </p>
               </div>
             )}
@@ -175,12 +238,12 @@ export default function SignupPage() {
               ) : (
                 <UserPlus className="w-4 h-4" />
               )}
-              Create space & sign up
+              {mode === 'SPACE_MANAGER' ? 'Create space & sign up' : 'Join space'}
             </button>
           </form>
 
           <div className="px-6 pb-6 text-center">
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-600">
               Already have an account?{' '}
               <Link
                 href="/dev-login"
@@ -188,11 +251,6 @@ export default function SignupPage() {
               >
                 Sign in
               </Link>
-            </p>
-            <p className="text-xs text-slate-400 mt-2">
-              Joining an existing space as a Member? Ask your Space
-              Manager for a seeded account for now — self-serve Member
-              signup isn&apos;t built yet.
             </p>
           </div>
         </div>

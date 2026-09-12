@@ -12,12 +12,14 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* Removed: a prefers-color-scheme dark override that swapped
+   --foreground to near-white (#ededed). Every component in this app
+   uses hardcoded light-theme Tailwind classes (bg-white, text-slate-900,
+   etc.) regardless of OS theme -- there is no actual dark mode UI here.
+   On a machine with OS dark mode on, that override made body text
+   nearly invisible against the app's always-white card backgrounds.
+   Pin to the light foreground always, matching what the app actually
+   looks like. */
 
 body {
   background: var(--background);

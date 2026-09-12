@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
+import PaymentStep from '@/components/PaymentStep';
 import { 
   CalendarDays, 
   Loader2, 
@@ -16,7 +17,9 @@ import {
   CalendarOff,
   CheckCircle2,
   XCircle,
-  Filter
+  Filter,
+  CreditCard,
+  X
 } from 'lucide-react';
 
 interface Booking {
@@ -25,6 +28,15 @@ interface Booking {
   bookableId: string;
   startTime: string;
   endTime: string;
+  userId: string;
+  amountCents: number | null;
+  paymentStatus: 'UNPAID' | 'PENDING' | 'PAID' | 'FAILED';
+}
+
+interface ActivePayment {
+  bookingId: string;
+  clientSecret: string;
+  amountCents: number;
 }
 
 type FilterType = 'all' | 'upcoming' | 'past' | 'desk' | 'room';
@@ -37,6 +49,10 @@ export default function BookingsPage() {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const role = useAuthStore((s) => s.role);
+  const userId = useAuthStore((s) => s.userId);
+  const [activePayment, setActivePayment] = useState<ActivePayment | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState<string | null>(null);
 
   const fetchBookings = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -67,6 +83,35 @@ export default function BookingsPage() {
   useEffect(() => {
     fetchBookings();
   }, []);
+
+  async function handleRetryPayment(bookingId: string) {
+    setRetryingId(bookingId);
+    setRetryError(null);
+
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/bookings/${bookingId}/pay`,
+        { method: 'POST', headers: getAuthHeaders() },
+      );
+
+      const body = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        setRetryError(body?.message ?? 'Could not start payment — please try again.');
+        return;
+      }
+
+      setActivePayment({
+        bookingId,
+        clientSecret: body.clientSecret,
+        amountCents: body.amountCents ?? 0,
+      });
+    } catch {
+      setRetryError('Network error — please try again.');
+    } finally {
+      setRetryingId(null);
+    }
+  }
 
   const filterBookings = (bookings: Booking[]) => {
     const now = new Date();
@@ -131,6 +176,19 @@ export default function BookingsPage() {
         return <XCircle className="w-3 h-3" />;
       default:
         return null;
+    }
+  };
+
+  const getPaymentStatusStyle = (status: Booking['paymentStatus']) => {
+    switch (status) {
+      case 'PAID':
+        return 'bg-green-100 text-green-700';
+      case 'PENDING':
+        return 'bg-amber-100 text-amber-700';
+      case 'FAILED':
+        return 'bg-red-100 text-red-700';
+      default:
+        return 'bg-slate-100 text-slate-600';
     }
   };
 
@@ -305,13 +363,16 @@ export default function BookingsPage() {
                   </div>
                   
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className="font-semibold text-slate-900 text-sm">
                         {booking.bookableType === 'DESK' ? 'Desk' : 'Room'} {booking.bookableId}
                       </h3>
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
                         {statusIcon}
                         {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </span>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${getPaymentStatusStyle(booking.paymentStatus)}`}>
+                        {booking.paymentStatus.charAt(0) + booking.paymentStatus.slice(1).toLowerCase()}
                       </span>
                     </div>
                     
@@ -324,6 +385,25 @@ export default function BookingsPage() {
                       </span>
                     </div>
                   </div>
+
+                  {role === 'MEMBER' &&
+                    booking.userId === userId &&
+                    (booking.paymentStatus === 'FAILED' || booking.paymentStatus === 'UNPAID') && (
+                      <button
+                        onClick={() => handleRetryPayment(booking.id)}
+                        disabled={retryingId === booking.id}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900
+                                 text-white text-xs font-medium rounded-lg hover:bg-slate-800
+                                 transition-colors disabled:opacity-60"
+                      >
+                        {retryingId === booking.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <CreditCard className="w-3.5 h-3.5" />
+                        )}
+                        {booking.paymentStatus === 'FAILED' ? 'Retry payment' : 'Pay now'}
+                      </button>
+                    )}
                   
                   <ChevronRight className="w-5 h-5 text-slate-400 shrink-0 
                                        transition-transform group-hover:translate-x-1" />
@@ -331,6 +411,41 @@ export default function BookingsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {retryError && (
+        <div className="fixed bottom-4 right-4 flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg shadow-lg">
+          <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+          <p className="text-sm text-red-700">{retryError}</p>
+          <button onClick={() => setRetryError(null)} className="text-red-400 hover:text-red-600">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {activePayment && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 relative">
+            <button
+              onClick={() => setActivePayment(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-lg font-bold text-slate-900 mb-1">Complete payment</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Finish paying for this booking to keep your slot.
+            </p>
+            <PaymentStep
+              clientSecret={activePayment.clientSecret}
+              amountCents={activePayment.amountCents}
+              onPaid={() => {
+                setActivePayment(null);
+                fetchBookings(false);
+              }}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -2,9 +2,10 @@
 
 import { useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useBookingStore, BookableType } from '@/store/bookingStore';
+import { useBookingStore, BookableType, CreatedBooking } from '@/store/bookingStore';
 import DateCalendar from '@/components/DateCalendar';
 import TimeSlotPicker from '@/components/TimeSlotPicker';
+import PaymentStep from '@/components/PaymentStep';
 import {
   Calendar,
   Clock,
@@ -58,6 +59,12 @@ export default function BookResourcePage() {
   const [endSlot, setEndSlot] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Set when a booking was created AND needs payment (clientSecret
+  // present) — renders the Stripe payment step in place of the form
+  // instead of navigating away immediately.
+  const [pendingPayment, setPendingPayment] = useState<CreatedBooking | null>(
+    null,
+  );
 
   const now = useMemo(() => new Date(), []);
 
@@ -145,12 +152,23 @@ export default function BookResourcePage() {
     setDraftResource(bookableType.toUpperCase() as BookableType, bookableId);
     setDraftTimes(startDateTime.toISOString(), endDateTime.toISOString());
 
-    const success = await submitBooking();
+    const created = await submitBooking();
 
-    if (success) {
-      router.push('/dashboard/bookings');
-    } else {
+    if (!created) {
       setConflict(true);
+      return;
+    }
+
+    if (created.clientSecret) {
+      // Payment needed — show the Stripe form in place of the booking
+      // form rather than navigating away. The booking already exists
+      // (PENDING) at this point; only the charge itself is pending.
+      setPendingPayment(created);
+    } else {
+      // No payment needed (e.g. Space Manager hasn't finished Stripe
+      // onboarding yet) — booking is UNPAID but complete, nothing
+      // further to do here.
+      router.push('/dashboard/bookings');
     }
   }
 
@@ -171,7 +189,35 @@ export default function BookResourcePage() {
         </button>
 
         <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-          <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6">
+          {pendingPayment ? (
+            <>
+              <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-slate-700/50 rounded-lg text-emerald-400">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h1 className="text-xl font-bold text-white">
+                      Booking confirmed — pay to finish
+                    </h1>
+                    <p className="text-sm text-slate-400">
+                      Your slot is held. Complete payment to lock it in.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6">
+                <PaymentStep
+                  clientSecret={pendingPayment.clientSecret!}
+                  amountCents={pendingPayment.amountCents ?? 0}
+                  onPaid={() => router.push('/dashboard/bookings')}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-slate-700/50 rounded-lg text-emerald-400">
                 {getBookableIcon()}
@@ -293,6 +339,8 @@ export default function BookResourcePage() {
               )}
             </button>
           </form>
+            </>
+          )}
         </div>
       </div>
     </div>

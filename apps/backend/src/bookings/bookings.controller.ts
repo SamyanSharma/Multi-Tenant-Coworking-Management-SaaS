@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Req,
   UseGuards,
@@ -42,6 +43,25 @@ export class BookingsController {
 
     return this.bookingsService.create(
       dto,
+      req.spaceId!,
+      userId,
+    );
+  }
+
+  // Re-attempt payment on a FAILED or still-UNPAID booking the caller
+  // owns — e.g. after a declined test card, or once the Space Manager
+  // finishes Stripe onboarding after the booking was already created.
+  @UseGuards(RbacGuard)
+  @Roles(Role.MEMBER)
+  @Post(':id/pay')
+  retryPayment(
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    const userId = getCallerUserId(req);
+
+    return this.bookingsService.retryPayment(
+      id,
       req.spaceId!,
       userId,
     );

@@ -1,4 +1,4 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
@@ -16,7 +16,8 @@ function uniqueConstraintError(target: string[]) {
 describe('AuthService', () => {
   let service: AuthService;
   let prisma: {
-    user: { findUnique: jest.Mock };
+    user: { findUnique: jest.Mock; create: jest.Mock };
+    space: { findUnique: jest.Mock };
     $transaction: jest.Mock;
   };
   let jwtService: JwtService;
@@ -30,7 +31,8 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     prisma = {
-      user: { findUnique: jest.fn() },
+      user: { findUnique: jest.fn(), create: jest.fn() },
+      space: { findUnique: jest.fn() },
       $transaction: jest.fn(),
     };
     jwtService = new JwtService({ secret: 'test-secret' });
@@ -103,7 +105,7 @@ describe('AuthService', () => {
     expect(decoded.spaceId).toBe('space-1');
   });
 
-  describe('signup', () => {
+  describe('signup — SPACE_MANAGER ("List my space")', () => {
     function mockTransaction(spaceId: string, userId: string) {
       const tx = {
         space: {
@@ -127,17 +129,20 @@ describe('AuthService', () => {
       return tx;
     }
 
+    const baseInput = {
+      name: 'Ada',
+      email: 'manager@acme.com',
+      password: 'a-real-password',
+      role: 'SPACE_MANAGER' as const,
+      spaceName: 'Acme Coworking',
+    };
+
     it('rejects signup when the email is already registered', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'existing-user' });
 
-      await expect(
-        service.signup(
-          'Ada',
-          'manager@acme.com',
-          'a-real-password',
-          'Acme Coworking',
-        ),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.signup(baseInput)).rejects.toThrow(
+        ConflictException,
+      );
 
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
@@ -146,12 +151,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
       const tx = mockTransaction('space-new', 'user-new');
 
-      const result = await service.signup(
-        'Ada',
-        'manager@acme.com',
-        'a-real-password',
-        'Acme Coworking',
-      );
+      const result = await service.signup(baseInput);
 
       expect(tx.space.create).toHaveBeenCalledWith({
         data: { name: 'Acme Coworking', slug: 'acme-coworking' },
@@ -187,12 +187,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
       const tx = mockTransaction('space-new', 'user-new');
 
-      await service.signup(
-        'Ada',
-        'manager@acme.com',
-        'a-real-password',
-        'Acme Coworking',
-      );
+      await service.signup(baseInput);
 
       const storedPassword = tx.user.create.mock.calls[0][0].data.password;
       expect(storedPassword).not.toBe('a-real-password');
@@ -232,12 +227,7 @@ describe('AuthService', () => {
         return cb(tx);
       });
 
-      const result = await service.signup(
-        'Ada',
-        'manager@acme.com',
-        'a-real-password',
-        'Acme Coworking',
-      );
+      const result = await service.signup(baseInput);
 
       expect(callCount).toBe(2);
       expect(result.user.spaceId).toBe('space-2');
@@ -249,14 +239,9 @@ describe('AuthService', () => {
         throw uniqueConstraintError(['email']);
       });
 
-      await expect(
-        service.signup(
-          'Ada',
-          'manager@acme.com',
-          'a-real-password',
-          'Acme Coworking',
-        ),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.signup(baseInput)).rejects.toThrow(
+        ConflictException,
+      );
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
@@ -267,16 +252,102 @@ describe('AuthService', () => {
         throw uniqueConstraintError(['slug']);
       });
 
-      await expect(
-        service.signup(
-          'Ada',
-          'manager@acme.com',
-          'a-real-password',
-          'Acme Coworking',
-        ),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.signup(baseInput)).rejects.toThrow(
+        ConflictException,
+      );
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('signup — MEMBER ("Rent a space")', () => {
+    const baseInput = {
+      name: 'Bob',
+      email: 'bob@example.com',
+      password: 'a-real-password',
+      role: 'MEMBER' as const,
+      spaceSlug: 'acme-coworking',
+    };
+
+    it('rejects signup when the email is already registered', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'existing-user' });
+
+      await expect(service.signup(baseInput)).rejects.toThrow(
+        ConflictException,
+      );
+
+      expect(prisma.space.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rejects when no space exists with that slug', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.space.findUnique.mockResolvedValue(null);
+
+      await expect(service.signup(baseInput)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('joins the existing space as MEMBER and returns a signed token', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.space.findUnique.mockResolvedValue({
+        id: 'space-existing',
+        name: 'Acme Coworking',
+        slug: 'acme-coworking',
+      });
+      prisma.user.create.mockResolvedValue({
+        id: 'user-bob',
+        email: 'bob@example.com',
+        name: 'Bob',
+        role: Role.MEMBER,
+        spaceId: 'space-existing',
+      });
+
+      const result = await service.signup(baseInput);
+
+      expect(prisma.space.findUnique).toHaveBeenCalledWith({
+        where: { slug: 'acme-coworking' },
+      });
+      expect(prisma.user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: 'Bob',
+          email: 'bob@example.com',
+          role: Role.MEMBER,
+          spaceId: 'space-existing',
+        }),
+      });
+
+      expect(result.user).toEqual({
+        id: 'user-bob',
+        email: 'bob@example.com',
+        name: 'Bob',
+        role: Role.MEMBER,
+        spaceId: 'space-existing',
+      });
+
+      const decoded = jwtService.verify(result.accessToken) as {
+        sub: string;
+        role: string;
+        spaceId: string;
+      };
+      expect(decoded.role).toBe(Role.MEMBER);
+      expect(decoded.spaceId).toBe('space-existing');
+    });
+
+    it('surfaces a race-condition email collision as a Conflict, not a raw 500', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.space.findUnique.mockResolvedValue({
+        id: 'space-existing',
+        name: 'Acme Coworking',
+        slug: 'acme-coworking',
+      });
+      prisma.user.create.mockRejectedValue(uniqueConstraintError(['email']));
+
+      await expect(service.signup(baseInput)).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 });

@@ -10,14 +10,29 @@ interface BookingDraft {
   endTime: string | null; // ISO string
 }
 
+// What POST /bookings (and POST /bookings/:id/pay) return. clientSecret
+// is null when no PaymentIntent was created (e.g. the Space Manager
+// hasn't finished Stripe onboarding yet) — the booking still succeeds,
+// just UNPAID, no payment step to show.
+export interface CreatedBooking {
+  id: string;
+  amountCents: number | null;
+  paymentStatus: 'UNPAID' | 'PENDING' | 'PAID' | 'FAILED';
+  clientSecret: string | null;
+}
+
 interface BookingState {
   draft: BookingDraft;
   isSubmitting: boolean;
   error: string | null;
+  lastCreatedBooking: CreatedBooking | null;
   setDraftResource: (bookableType: BookableType, bookableId: string) => void;
   setDraftTimes: (startTime: string, endTime: string) => void;
   clearDraft: () => void;
-  submitBooking: () => Promise<boolean>; // returns success/failure
+  // Returns the created booking on success (so the caller can check
+  // clientSecret and show a payment step), or null on failure (check
+  // `error` for why).
+  submitBooking: () => Promise<CreatedBooking | null>;
 }
 
 const emptyDraft: BookingDraft = {
@@ -31,6 +46,7 @@ export const useBookingStore = create<BookingState>((set, get) => ({
   draft: emptyDraft,
   isSubmitting: false,
   error: null,
+  lastCreatedBooking: null,
 
   setDraftResource: (bookableType, bookableId) =>
     set((state) => ({ draft: { ...state.draft, bookableType, bookableId } })),
@@ -54,25 +70,26 @@ export const useBookingStore = create<BookingState>((set, get) => ({
         body: JSON.stringify(draft),
       });
 
+      const body = await res.json().catch(() => null);
+
       if (!res.ok) {
         // NOTE: real backend returns 403 (not 409) on the double-booking
         // rejection — confirmed from bookings.service.ts. This still
         // works correctly since it checks !res.ok generically and reads
         // body.message regardless of status code, but don't branch on
         // res.status === 409 anywhere without checking this first.
-        const body = await res.json().catch(() => null);
         set({
           error: body?.message ?? 'Booking failed — that slot may already be taken.',
           isSubmitting: false,
         });
-        return false;
+        return null;
       }
 
-      set({ isSubmitting: false, draft: emptyDraft });
-      return true;
+      set({ isSubmitting: false, draft: emptyDraft, lastCreatedBooking: body });
+      return body as CreatedBooking;
     } catch {
       set({ error: 'Network error — please try again.', isSubmitting: false });
-      return false;
+      return null;
     }
   },
 }));
