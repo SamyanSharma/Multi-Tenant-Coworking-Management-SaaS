@@ -64,23 +64,73 @@ export class AnalyticsService {
 
     const now = new Date();
 
-    const [totalBookings, paidBookings, activeBookings] = await Promise.all([
+    // "vs last month" cards used to show hardcoded literals (+12.5%
+    // etc.) with no data behind them at all. Real comparison instead:
+    // rolling 30-day windows rather than calendar months, so it's a
+    // fair day-count comparison (today vs. 30 days ago) instead of a
+    // full previous month vs. a partial current month.
+    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+    const currentPeriodStart = new Date(now.getTime() - THIRTY_DAYS_MS);
+    const previousPeriodStart = new Date(
+      now.getTime() - 2 * THIRTY_DAYS_MS,
+    );
+
+    const [
+      totalBookings,
+      paidBookings,
+      activeBookings,
+      currentPeriodBookingCount,
+      previousPeriodBookingCount,
+      currentPeriodPaidBookings,
+      previousPeriodPaidBookings,
+    ] = await Promise.all([
       this.prisma.booking.count({ where: bookingWhere }),
-    
+
       this.prisma.booking.findMany({
         where: { ...bookingWhere, paymentStatus: 'PAID' },
         select: { amountCents: true },
       }),
-      
+
       this.prisma.booking.count({
         where: { ...bookingWhere, startTime: { lte: now }, endTime: { gte: now } },
       }),
+
+      this.prisma.booking.count({
+        where: { ...bookingWhere, createdAt: { gte: currentPeriodStart } },
+      }),
+
+      this.prisma.booking.count({
+        where: {
+          ...bookingWhere,
+          createdAt: { gte: previousPeriodStart, lt: currentPeriodStart },
+        },
+      }),
+
+      this.prisma.booking.findMany({
+        where: {
+          ...bookingWhere,
+          paymentStatus: 'PAID',
+          createdAt: { gte: currentPeriodStart },
+        },
+        select: { amountCents: true },
+      }),
+
+      this.prisma.booking.findMany({
+        where: {
+          ...bookingWhere,
+          paymentStatus: 'PAID',
+          createdAt: { gte: previousPeriodStart, lt: currentPeriodStart },
+        },
+        select: { amountCents: true },
+      }),
     ]);
 
-    const totalRevenue = paidBookings.reduce(
-      (sum, b) => sum + (b.amountCents ?? 0),
-      0,
-    );
+    const sumCents = (rows: { amountCents: number | null }[]) =>
+      rows.reduce((sum, b) => sum + (b.amountCents ?? 0), 0);
+
+    const totalRevenue = sumCents(paidBookings);
+    const currentPeriodRevenue = sumCents(currentPeriodPaidBookings);
+    const previousPeriodRevenue = sumCents(previousPeriodPaidBookings);
 
     const utilizationRate =
       totalResourceCount === 0 ? 0 : activeBookings / totalResourceCount;
@@ -90,6 +140,25 @@ export class AnalyticsService {
       activeBookings,
       totalBookings,
       utilizationRate,
+      // null means "not expressible as a percentage" — e.g. previous
+      // period was 0 and current period is >0 (infinite growth), or
+      // there's simply no bookings/revenue in either period yet. The
+      // frontend shows a neutral "New" badge instead of a fake number.
+      revenueChangePct: this.pctChange(
+        currentPeriodRevenue,
+        previousPeriodRevenue,
+      ),
+      totalBookingsChangePct: this.pctChange(
+        currentPeriodBookingCount,
+        previousPeriodBookingCount,
+      ),
     };
+  }
+
+  private pctChange(current: number, previous: number): number | null {
+    if (previous === 0) {
+      return current === 0 ? 0 : null;
+    }
+    return ((current - previous) / previous) * 100;
   }
 }
