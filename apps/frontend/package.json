@@ -10,6 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^6.10.0",
+    "@stripe/stripe-js": "^9.16.0",
     "lucide-react": "^1.34.0",
     "next": "16.2.12",
     "react": "19.2.4",

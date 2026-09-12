@@ -218,6 +218,7 @@ export class BookingsService {
 
 
       let updatedBooking = booking;
+      let clientSecret: string | null = null;
 
 
 
@@ -227,38 +228,14 @@ export class BookingsService {
       ) {
 
         try {
+          const result = await this.createAndAttachPaymentIntent(
+            booking.id,
+            space.priceCents,
+            spaceManager.stripeAccountId,
+          );
 
-          const paymentIntent =
-            await this.stripeService
-              .createBookingPaymentIntent({
-                amountCents:
-                  space.priceCents,
-
-                connectedAccountId:
-                  spaceManager.stripeAccountId,
-
-                bookingId:
-                  booking.id,
-              });
-
-
-
-          updatedBooking =
-            await this.prisma.booking.update({
-              where: {
-                id: booking.id,
-              },
-
-              data: {
-                paymentStatus:
-                  'PENDING',
-
-                stripePaymentIntentId:
-                  paymentIntent.id,
-              },
-            });
-
-
+          updatedBooking = result.booking;
+          clientSecret = result.clientSecret;
         } catch {
 
           /*
@@ -289,7 +266,12 @@ export class BookingsService {
       );
 
 
-      return updatedBooking;
+      // clientSecret is NOT a Booking column — it's Stripe's ephemeral
+      // token for confirming this specific PaymentIntent client-side
+      // (via Stripe.js). Returned once here so the frontend can
+      // immediately render a payment form; it is never persisted or
+      // returned again from any other endpoint (e.g. GET /bookings).
+      return { ...updatedBooking, clientSecret };
 
 
 
@@ -317,5 +299,108 @@ export class BookingsService {
 
       throw err;
     }
+  }
+
+  // Lets a Member re-attempt payment on their own booking after a
+  // card decline (paymentStatus FAILED), or complete payment on a
+  // booking that was created UNPAID because the Space Manager hadn't
+  // finished Stripe onboarding yet at booking time and has since done
+  // so. Does NOT touch PAID bookings (nothing to retry) or PENDING
+  // ones (a PaymentIntent is already awaiting confirmation for those
+  // — creating a second one would let the same slot get double-billed
+  // if both were ever confirmed).
+  async retryPayment(
+    bookingId: string,
+    spaceId: string,
+    userId: string,
+  ) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    if (booking.userId !== userId) {
+      throw new BadRequestException(
+        'You can only retry payment on your own booking',
+      );
+    }
+
+    // Confirms the booking's bookable actually belongs to this
+    // tenant — same tenant-isolation check create() does via
+    // resolveBookable, applied here since retryPayment is reached by
+    // booking id alone, not scoped by a spaceId path segment.
+    await this.resolveBookable(
+      booking.bookableType,
+      booking.bookableId,
+      spaceId,
+    );
+
+    if (booking.paymentStatus === 'PAID') {
+      throw new BadRequestException('This booking is already paid');
+    }
+
+    if (booking.paymentStatus === 'PENDING') {
+      throw new BadRequestException(
+        'A payment is already in progress for this booking — check your email or wait a moment and refresh',
+      );
+    }
+
+    if (booking.amountCents === null) {
+      throw new BadRequestException(
+        'This booking has no price attached — cannot create a payment',
+      );
+    }
+
+    const spaceManager = await this.prisma.user.findFirst({
+      where: { spaceId, role: 'SPACE_MANAGER' },
+      select: {
+        stripeAccountId: true,
+        stripeOnboardingComplete: true,
+      },
+    });
+
+    if (
+      !spaceManager?.stripeAccountId ||
+      !spaceManager.stripeOnboardingComplete
+    ) {
+      throw new BadRequestException(
+        'This space is not yet set up to accept payments',
+      );
+    }
+
+    const { booking: updatedBooking, clientSecret } =
+      await this.createAndAttachPaymentIntent(
+        booking.id,
+        booking.amountCents,
+        spaceManager.stripeAccountId,
+      );
+
+    return { ...updatedBooking, clientSecret };
+  }
+
+  private async createAndAttachPaymentIntent(
+    bookingId: string,
+    amountCents: number,
+    connectedAccountId: string,
+  ) {
+    const paymentIntent =
+      await this.stripeService.createBookingPaymentIntent({
+        amountCents,
+        connectedAccountId,
+        bookingId,
+      });
+
+    const booking = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: paymentIntent.id,
+      },
+    });
+
+    return { booking, clientSecret: paymentIntent.client_secret };
   }
 }
