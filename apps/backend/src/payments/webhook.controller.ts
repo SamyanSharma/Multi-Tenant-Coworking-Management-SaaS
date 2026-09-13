@@ -119,45 +119,17 @@ export class WebhookController {
           break;
         }
 
-       
-
-        const accountData = account as Stripe.Account & {
-          requirements?: {
-            currently_due?: string[] | null;
-            past_due?: string[] | null;
-            disabled_reason?: string | null;
-          } | null;
-
-          applied_configurations?: string[] | null;
-
-          capabilities?: {
-            card_payments?: string;
-          };
-        };
-
-        const currentlyDue =
-          accountData.requirements?.currently_due ?? [];
-
-        const pastDue =
-          accountData.requirements?.past_due ?? [];
-
-        const disabledReason =
-          accountData.requirements?.disabled_reason ?? null;
-
-        const traditionalAccountComplete = Boolean(
-          account.charges_enabled &&
-            account.details_submitted,
-        );
-
-        const v2AccountComplete =
-          Array.isArray(accountData.applied_configurations) &&
-          accountData.applied_configurations.includes('merchant') &&
-          currentlyDue.length === 0 &&
-          pastDue.length === 0 &&
-          disabledReason === null;
-
-        const isComplete =
-          traditionalAccountComplete || v2AccountComplete;
+        const { isComplete, currentlyDue, pastDue, disabledReason } =
+          StripeService.computeOnboardingStatus(
+            account as Stripe.Account & {
+              requirements?: {
+                currently_due?: string[] | null;
+                past_due?: string[] | null;
+                disabled_reason?: string | null;
+              } | null;
+              applied_configurations?: string[] | null;
+            },
+          );
 
         await this.prisma.user.update({
           where: { id: userId },
@@ -170,10 +142,7 @@ export class WebhookController {
           `User ${userId} stripeOnboardingComplete=${isComplete} ` +
             `currentlyDue=${currentlyDue.length} ` +
             `pastDue=${pastDue.length} ` +
-            `disabledReason=${disabledReason ?? 'none'} ` +
-            `appliedConfigurations=${
-              accountData.applied_configurations?.join(',') ?? 'none'
-            }`,
+            `disabledReason=${disabledReason ?? 'none'}`,
         );
 
         break;

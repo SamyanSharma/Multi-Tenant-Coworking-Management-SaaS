@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 import { 
@@ -101,15 +101,45 @@ export default function BillingPage() {
   );
 }
 
+interface OnboardingStatus {
+  connected: boolean;
+  onboardingComplete: boolean;
+  currentlyDue: string[];
+  pastDue: string[];
+  disabledReason: string | null;
+}
+
 function SpaceManagerOnboarding() {
   const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+
+  useEffect(() => {
+    checkStatus();
+  }, []);
+
+  async function checkStatus() {
+    setCheckingStatus(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/payments/status`, {
+        headers: getAuthHeaders(),
+      });
+      const body = await res.json().catch(() => null);
+      if (res.ok) {
+        setStatus(body);
+      }
+      // A failed status check isn't fatal — the onboard button below
+      // still works either way, it just can't show a "Connected"
+      // state until this succeeds.
+    } finally {
+      setCheckingStatus(false);
+    }
+  }
 
   async function handleOnboard() {
     setRedirecting(true);
     setError(null);
-    setSuccess(false);
     
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/payments/onboard`, {
@@ -123,17 +153,15 @@ function SpaceManagerOnboarding() {
       }
       
       const { url } = await res.json();
-      setSuccess(true);
-      
-      setTimeout(() => {
-        window.location.href = url;
-      }, 1500);
+      window.location.href = url;
       
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setRedirecting(false);
     }
   }
+
+  const isConnected = status?.connected && status.onboardingComplete;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
@@ -152,33 +180,47 @@ function SpaceManagerOnboarding() {
           </div>
 
           <div className="p-6 space-y-6">
-            {error && (
-              <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
-                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
-                <div>
-                  <h2 className="text-sm font-semibold text-red-800 mb-1">
-                    Onboarding Failed
-                  </h2>
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
+            {checkingStatus ? (
+              <div className="flex items-center gap-2 p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Checking your Stripe connection...
               </div>
-            )}
-
-            {success && (
+            ) : isConnected ? (
               <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
                 <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 shrink-0" />
                 <div>
-                  <h2 className="text-sm font-semibold text-green-800 mb-1">
-                    Success!
+                  <h2 className="text-sm font-semibold text-green-900 mb-1">
+                    Connected — you can accept payments
                   </h2>
-                  <p className="text-sm text-green-700">
-                    Redirecting to Stripe...
+                  <p className="text-sm text-green-800 leading-relaxed">
+                    Your Stripe account is fully onboarded. Bookings paid by
+                    Members are automatically split 95% to you / 5% platform fee.
                   </p>
                 </div>
               </div>
-            )}
-
-            <div className="space-y-4">
+            ) : status?.connected ? (
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <h2 className="text-sm font-semibold text-amber-900 mb-1">
+                    Almost there — Stripe needs a bit more information
+                  </h2>
+                  {status.currentlyDue.length > 0 && (
+                    <p className="text-sm text-amber-800 leading-relaxed">
+                      Still needed: {status.currentlyDue.join(', ')}
+                    </p>
+                  )}
+                  {status.disabledReason && (
+                    <p className="text-sm text-amber-800 leading-relaxed mt-1">
+                      Reason: {status.disabledReason}
+                    </p>
+                  )}
+                  <p className="text-sm text-amber-800 leading-relaxed mt-1">
+                    Continue the Stripe flow below to finish.
+                  </p>
+                </div>
+              </div>
+            ) : (
               <div className="flex items-start gap-3 p-4 bg-slate-50 border border-slate-200 rounded-xl">
                 <Zap className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
                 <div>
@@ -192,47 +234,53 @@ function SpaceManagerOnboarding() {
                   </p>
                 </div>
               </div>
+            )}
 
-              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <Info className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+            {error && (
+              <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
                 <div>
-                  <h2 className="text-sm font-semibold text-amber-900 mb-2">
-                    Important Note
+                  <h2 className="text-sm font-semibold text-red-800 mb-1">
+                    Onboarding Failed
                   </h2>
-                  <p className="text-sm text-amber-800 leading-relaxed">
-                    There's no way yet to check if you've already completed onboarding 
-                    from this page. Clicking the button always starts or resumes the 
-                    Stripe flow.
-                  </p>
+                  <p className="text-sm text-red-700">{error}</p>
                 </div>
               </div>
-            </div>
+            )}
 
-            <button
-              onClick={handleOnboard}
-              disabled={redirecting || success}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 
-                       bg-slate-900 text-white rounded-lg text-sm font-medium 
-                       hover:bg-slate-800 transition-all disabled:opacity-50 
-                       disabled:cursor-not-allowed"
-            >
-              {redirecting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Redirecting to Stripe...
-                </>
-              ) : success ? (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  Redirecting...
-                </>
-              ) : (
-                <>
-                  <ExternalLink className="w-4 h-4" />
-                  Onboard with Stripe
-                </>
-              )}
-            </button>
+            {!isConnected && (
+              <button
+                onClick={handleOnboard}
+                disabled={redirecting || checkingStatus}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 
+                         bg-slate-900 text-white rounded-lg text-sm font-medium 
+                         hover:bg-slate-800 transition-all disabled:opacity-50 
+                         disabled:cursor-not-allowed"
+              >
+                {redirecting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Redirecting to Stripe...
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink className="w-4 h-4" />
+                    {status?.connected ? 'Continue onboarding' : 'Onboard with Stripe'}
+                  </>
+                )}
+              </button>
+            )}
+
+            {isConnected && (
+              <button
+                onClick={checkStatus}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5
+                         border border-slate-300 text-slate-700 rounded-lg text-sm font-medium
+                         hover:bg-slate-50 transition-all"
+              >
+                Refresh status
+              </button>
+            )}
           </div>
         </div>
       </div>
