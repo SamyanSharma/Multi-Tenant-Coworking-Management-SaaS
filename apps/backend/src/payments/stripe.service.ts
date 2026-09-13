@@ -195,4 +195,67 @@ export class StripeService {
 
     return link.url;
   }
+
+  // Same shape of account data the account.updated webhook receives
+  // (Stripe.Account, extended with the v2-preview fields this app's
+  // Accounts v2 accounts actually carry) — used by both the webhook
+  // handler and getAccountStatus() below so the two can never
+  // disagree about what "onboarding complete" means.
+  static computeOnboardingStatus(
+    account: Stripe.Account & {
+      requirements?: {
+        currently_due?: string[] | null;
+        past_due?: string[] | null;
+        disabled_reason?: string | null;
+      } | null;
+      applied_configurations?: string[] | null;
+    },
+  ): {
+    isComplete: boolean;
+    currentlyDue: string[];
+    pastDue: string[];
+    disabledReason: string | null;
+  } {
+    const currentlyDue = account.requirements?.currently_due ?? [];
+    const pastDue = account.requirements?.past_due ?? [];
+    const disabledReason = account.requirements?.disabled_reason ?? null;
+
+    const traditionalAccountComplete = Boolean(
+      account.charges_enabled && account.details_submitted,
+    );
+
+    const v2AccountComplete =
+      Array.isArray(account.applied_configurations) &&
+      account.applied_configurations.includes('merchant') &&
+      currentlyDue.length === 0 &&
+      pastDue.length === 0 &&
+      disabledReason === null;
+
+    return {
+      isComplete: traditionalAccountComplete || v2AccountComplete,
+      currentlyDue,
+      pastDue,
+      disabledReason,
+    };
+  }
+
+  // Actively asks Stripe for this account's current state, rather
+  // than only trusting the account.updated webhook. This matters
+  // because in local dev, that webhook simply never arrives unless
+  // `stripe listen --forward-to localhost:3000/payments/webhook` is
+  // running — completing onboarding in the browser would otherwise
+  // leave stripeOnboardingComplete permanently stuck at false with no
+  // way to self-correct.
+  async getAccountStatus(accountId: string) {
+    const response = await this.stripe.rawRequest(
+      'GET',
+      `/v2/core/accounts/${accountId}`,
+      {},
+      { apiVersion: STRIPE_ACCOUNTS_V2_API_VERSION },
+    );
+
+    return StripeService.computeOnboardingStatus(
+      response as unknown as Stripe.Account,
+    );
+  }
 }

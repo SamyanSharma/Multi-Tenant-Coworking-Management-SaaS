@@ -12,6 +12,8 @@ import {
   CheckCircle2,
   UserPlus,
   KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 type SignupMode = 'SPACE_MANAGER' | 'MEMBER';
@@ -24,6 +26,7 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [spaceName, setSpaceName] = useState('');
   const [spaceSlug, setSpaceSlug] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>(
@@ -198,16 +201,31 @@ export default function SignupPage() {
               >
                 Password
               </label>
-              <input
-                id="password"
-                type="password"
-                required
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="At least 8 characters"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={8}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="At least 8 characters"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
