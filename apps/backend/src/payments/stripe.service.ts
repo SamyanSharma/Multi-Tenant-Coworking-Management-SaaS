@@ -120,6 +120,11 @@ export class StripeService {
     stripeAccountId: string | null;
   }): Promise<string> {
     if (user.stripeAccountId) {
+      // Patches accounts created before the recipient capability fix
+      // below existed (like any account created prior to this
+      // change) — safe to call every time: Stripe treats re-
+      // requesting an already-granted capability as a no-op.
+      await this.ensureRecipientCapability(user.stripeAccountId);
       return user.stripeAccountId;
     }
 
@@ -138,10 +143,30 @@ export class StripeService {
         },
 
         configuration: {
+          // merchant.card_payments: lets this account be the
+          // customer-facing merchant for a card charge.
           merchant: {
             capabilities: {
               card_payments: {
                 requested: true,
+              },
+            },
+          },
+
+          // recipient.stripe_balance.stripe_transfers: lets this
+          // account actually RECEIVE the transfer_data.destination
+          // transfer that createBookingPaymentIntent() sends it.
+          // Without this, every PaymentIntent creation fails with
+          // "Your destination account needs to have at least one of
+          // the following capabilities enabled: transfers..." —
+          // merchant alone only covers charging a card, not being the
+          // destination of a transfer.
+          recipient: {
+            capabilities: {
+              stripe_balance: {
+                stripe_transfers: {
+                  requested: true,
+                },
               },
             },
           },
@@ -177,6 +202,31 @@ export class StripeService {
     }
 
     return accountId;
+  }
+
+  private async ensureRecipientCapability(
+    accountId: string,
+  ): Promise<void> {
+    await this.stripe.rawRequest(
+      'POST',
+      `/v2/core/accounts/${accountId}`,
+      {
+        configuration: {
+          recipient: {
+            capabilities: {
+              stripe_balance: {
+                stripe_transfers: {
+                  requested: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        apiVersion: STRIPE_ACCOUNTS_V2_API_VERSION,
+      },
+    );
   }
 
  
@@ -227,6 +277,7 @@ export class StripeService {
     const v2AccountComplete =
       Array.isArray(account.applied_configurations) &&
       account.applied_configurations.includes('merchant') &&
+      account.applied_configurations.includes('recipient') &&
       currentlyDue.length === 0 &&
       pastDue.length === 0 &&
       disabledReason === null;

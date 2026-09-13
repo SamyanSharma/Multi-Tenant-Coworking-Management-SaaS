@@ -110,7 +110,21 @@ describe('StripeService.computeOnboardingStatus', () => {
     ).toBe(false);
   });
 
-  it('is complete via the v2 path: merchant configuration applied with no outstanding requirements', () => {
+  it('is complete via the v2 path: merchant AND recipient configurations both applied with no outstanding requirements', () => {
+    const result = StripeService.computeOnboardingStatus(
+      account({
+        applied_configurations: ['merchant', 'recipient'],
+        requirements: {
+          currently_due: [],
+          past_due: [],
+          disabled_reason: null,
+        },
+      }),
+    );
+    expect(result.isComplete).toBe(true);
+  });
+
+  it('is NOT complete via the v2 path when only "merchant" is applied but "recipient" is missing — this is the exact bug that caused "Booking Conflict: Could not setup payment for booking" (destination charges need the recipient capability to receive transfers, not just the merchant capability to accept card payments)', () => {
     const result = StripeService.computeOnboardingStatus(
       account({
         applied_configurations: ['merchant'],
@@ -121,7 +135,7 @@ describe('StripeService.computeOnboardingStatus', () => {
         },
       }),
     );
-    expect(result.isComplete).toBe(true);
+    expect(result.isComplete).toBe(false);
   });
 
   it('is NOT complete via the v2 path when currently_due is non-empty', () => {
@@ -176,6 +190,64 @@ describe('StripeService.computeOnboardingStatus', () => {
     expect(result.pastDue).toEqual([]);
     expect(result.disabledReason).toBeNull();
     expect(result.isComplete).toBe(false);
+  });
+});
+
+describe('StripeService.createOrGetConnectAccount', () => {
+  function serviceWithMockedStripe() {
+    process.env.STRIPE_SECRET_KEY = 'sk_test_unit_test_placeholder_key';
+    const service = new StripeService();
+    const rawRequest = jest.fn();
+    (service as any).stripe = { rawRequest };
+    return { service, rawRequest };
+  }
+
+  it('requests BOTH merchant.card_payments AND recipient.stripe_balance.stripe_transfers when creating a new account', async () => {
+    const { service, rawRequest } = serviceWithMockedStripe();
+    rawRequest.mockResolvedValue({ id: 'acct_new_123' });
+
+    const accountId = await service.createOrGetConnectAccount({
+      id: 'user-1',
+      email: 'manager@example.com',
+      stripeAccountId: null,
+    });
+
+    expect(accountId).toBe('acct_new_123');
+    expect(rawRequest).toHaveBeenCalledTimes(1);
+
+    const [method, path, body] = rawRequest.mock.calls[0];
+    expect(method).toBe('POST');
+    expect(path).toBe('/v2/core/accounts');
+    expect(body.configuration.merchant.capabilities.card_payments.requested).toBe(true);
+    expect(
+      body.configuration.recipient.capabilities.stripe_balance.stripe_transfers
+        .requested,
+    ).toBe(true);
+  });
+
+  it('patches an existing account to ensure the recipient capability, without creating a new one — this is the fix for accounts created before this capability existed', async () => {
+    const { service, rawRequest } = serviceWithMockedStripe();
+    rawRequest.mockResolvedValue({});
+
+    const accountId = await service.createOrGetConnectAccount({
+      id: 'user-1',
+      email: 'manager@example.com',
+      stripeAccountId: 'acct_existing_456',
+    });
+
+    expect(accountId).toBe('acct_existing_456');
+    expect(rawRequest).toHaveBeenCalledTimes(1);
+
+    const [method, path, body] = rawRequest.mock.calls[0];
+    expect(method).toBe('POST');
+    expect(path).toBe('/v2/core/accounts/acct_existing_456');
+    expect(
+      body.configuration.recipient.capabilities.stripe_balance.stripe_transfers
+        .requested,
+    ).toBe(true);
+    // Must NOT re-request merchant/card_payments or hit the account-
+    // creation endpoint — this call only patches the missing piece.
+    expect(path).not.toBe('/v2/core/accounts');
   });
 });
 
