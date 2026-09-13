@@ -13,7 +13,6 @@ import {
   LayoutGrid,
   DoorOpen,
   User,
-  ChevronRight,
   CalendarOff,
   CheckCircle2,
   XCircle,
@@ -350,7 +349,7 @@ export default function BookingsPage() {
             return (
               <div
                 key={booking.id}
-                className="group bg-white rounded-xl border border-slate-200 shadow-sm 
+                className="bg-white rounded-xl border border-slate-200 shadow-sm 
                          hover:shadow-md transition-all duration-200 p-4"
               >
                 <div className="flex items-center gap-4">
@@ -404,9 +403,6 @@ export default function BookingsPage() {
                         {booking.paymentStatus === 'FAILED' ? 'Retry payment' : 'Pay now'}
                       </button>
                     )}
-                  
-                  <ChevronRight className="w-5 h-5 text-slate-400 shrink-0 
-                                       transition-transform group-hover:translate-x-1" />
                 </div>
               </div>
             );

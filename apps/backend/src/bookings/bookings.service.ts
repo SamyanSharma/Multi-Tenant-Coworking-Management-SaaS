@@ -96,7 +96,7 @@ export class BookingsService {
     );
 
 
-    return this.prisma.booking.findMany({
+    const bookings = await this.prisma.booking.findMany({
       where: {
         OR: [
           {
@@ -114,6 +114,98 @@ export class BookingsService {
         ],
       },
     });
+
+    return this.reconcilePendingPayments(bookings);
+  }
+
+  // Self-heals bookings stuck at PENDING because
+  // payment_intent.succeeded/failed never arrived — the same problem
+  // account.updated had for onboarding status, fixed the same way:
+  // actively ask Stripe instead of only trusting the webhook. Runs on
+  // every list load; only PENDING rows with a stripePaymentIntentId
+  // cost a Stripe API call, so this is cheap for a real class demo's
+  // booking volume.
+  private async reconcilePendingPayments<
+    T extends {
+      id: string;
+      paymentStatus: string;
+      stripePaymentIntentId: string | null;
+    },
+  >(bookings: T[]): Promise<T[]> {
+    const pending = bookings.filter(
+      (b) => b.paymentStatus === 'PENDING' && b.stripePaymentIntentId,
+    );
+
+    if (pending.length === 0) {
+      return bookings;
+    }
+
+    const resolutions = await Promise.all(
+      pending.map(async (booking) => {
+        try {
+          const { status, hasFailedAttempt } =
+            await this.stripeService.getPaymentIntentStatus(
+              booking.stripePaymentIntentId!,
+            );
+
+          let resolvedStatus: 'PAID' | 'FAILED' | null = null;
+
+          if (status === 'succeeded') {
+            resolvedStatus = 'PAID';
+          } else if (
+            status === 'canceled' ||
+            (status === 'requires_payment_method' && hasFailedAttempt)
+          ) {
+            // requires_payment_method alone isn't necessarily a
+            // failure — a brand-new, never-attempted PaymentIntent
+            // starts in this exact status too. Only treat it as
+            // FAILED once an attempt has actually been made and
+            // declined (hasFailedAttempt).
+            resolvedStatus = 'FAILED';
+          }
+          // Any other status (processing, requires_action,
+          // requires_confirmation, requires_capture) is genuinely
+          // still in progress — leave it PENDING.
+
+          return resolvedStatus
+            ? { id: booking.id, resolvedStatus }
+            : null;
+        } catch {
+          // A Stripe lookup failing (rate limit, network blip)
+          // shouldn't break the whole booking list — leave this one
+          // PENDING and let the next list load retry it.
+          return null;
+        }
+      }),
+    );
+
+    const toUpdate = resolutions.filter(
+      (r): r is { id: string; resolvedStatus: 'PAID' | 'FAILED' } =>
+        r !== null,
+    );
+
+    if (toUpdate.length === 0) {
+      return bookings;
+    }
+
+    await Promise.all(
+      toUpdate.map((update) =>
+        this.prisma.booking.update({
+          where: { id: update.id },
+          data: { paymentStatus: update.resolvedStatus },
+        }),
+      ),
+    );
+
+    const resolvedById = new Map(
+      toUpdate.map((update) => [update.id, update.resolvedStatus]),
+    );
+
+    return bookings.map((booking) =>
+      resolvedById.has(booking.id)
+        ? { ...booking, paymentStatus: resolvedById.get(booking.id)! }
+        : booking,
+    );
   }
 
 

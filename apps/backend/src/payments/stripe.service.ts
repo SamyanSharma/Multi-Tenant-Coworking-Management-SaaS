@@ -309,4 +309,26 @@ export class StripeService {
       response as unknown as Stripe.Account,
     );
   }
+
+  // Actively checks a PaymentIntent's real status, the same way
+  // getAccountStatus() does for onboarding — used by
+  // bookings.service.ts to self-heal bookings stuck at PENDING
+  // because payment_intent.succeeded/failed never arrived (e.g.
+  // `stripe listen` wasn't running yet when the payment was
+  // confirmed). hasFailedAttempt distinguishes a genuinely fresh
+  // PaymentIntent (status requires_payment_method, never attempted)
+  // from one that reverted to requires_payment_method after a
+  // decline — only the latter should be treated as FAILED.
+  async getPaymentIntentStatus(paymentIntentId: string): Promise<{
+    status: Stripe.PaymentIntent.Status;
+    hasFailedAttempt: boolean;
+  }> {
+    const intent =
+      await this.stripe.paymentIntents.retrieve(paymentIntentId);
+
+    return {
+      status: intent.status,
+      hasFailedAttempt: Boolean(intent.last_payment_error),
+    };
+  }
 }
