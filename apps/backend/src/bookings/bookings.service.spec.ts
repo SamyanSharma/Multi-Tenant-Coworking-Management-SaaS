@@ -12,8 +12,12 @@ function buildDeps() {
         id: 'desk-1',
         zone: { spaceId: 'space-1' },
       }),
+      findMany: jest.fn().mockResolvedValue([{ id: 'desk-1' }]),
     },
-    room: { findUnique: jest.fn() },
+    room: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     space: {
       findUnique: jest.fn().mockResolvedValue({ priceCents: 1000 }),
     },
@@ -26,6 +30,7 @@ function buildDeps() {
     },
     booking: {
       findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
@@ -43,6 +48,7 @@ function buildDeps() {
       id: 'pi_123',
       client_secret: 'pi_123_secret_abc',
     }),
+    getPaymentIntentStatus: jest.fn(),
   };
 
   const service = new BookingsService(
@@ -168,6 +174,105 @@ describe('BookingsService.create — payment flow', () => {
     );
     const broadcastArg = eventsGateway.emitBookingCreated.mock.calls[0][1];
     expect(broadcastArg.clientSecret).toBeUndefined();
+  });
+});
+
+describe('BookingsService.findAllForSpace — payment reconciliation', () => {
+  it('leaves PAID/FAILED/UNPAID bookings untouched — no Stripe calls for them', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PAID', stripePaymentIntentId: 'pi_1' },
+      { id: 'b2', paymentStatus: 'UNPAID', stripePaymentIntentId: null },
+      { id: 'b3', paymentStatus: 'FAILED', stripePaymentIntentId: 'pi_3' },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(stripeService.getPaymentIntentStatus).not.toHaveBeenCalled();
+    expect(result).toHaveLength(3);
+    expect(prisma.booking.update).not.toHaveBeenCalled();
+  });
+
+  it('flips a PENDING booking to PAID when Stripe reports the PaymentIntent succeeded — self-heals a booking stuck PENDING because the webhook never arrived', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'succeeded',
+      hasFailedAttempt: false,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0].paymentStatus).toBe('PAID');
+    expect(prisma.booking.update).toHaveBeenCalledWith({
+      where: { id: 'b1' },
+      data: { paymentStatus: 'PAID' },
+    });
+  });
+
+  it('flips a PENDING booking to FAILED after a declined card (requires_payment_method + hasFailedAttempt)', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'requires_payment_method',
+      hasFailedAttempt: true,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0].paymentStatus).toBe('FAILED');
+  });
+
+  it('does NOT flip a fresh, never-attempted PaymentIntent to FAILED just because it is requires_payment_method (that is the normal starting status)', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'requires_payment_method',
+      hasFailedAttempt: false,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0].paymentStatus).toBe('PENDING');
+    expect(prisma.booking.update).not.toHaveBeenCalled();
+  });
+
+  it('leaves genuinely in-progress statuses (requires_action, processing) as PENDING', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+      { id: 'b2', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_2' },
+    ]);
+    stripeService.getPaymentIntentStatus
+      .mockResolvedValueOnce({ status: 'requires_action', hasFailedAttempt: false })
+      .mockResolvedValueOnce({ status: 'processing', hasFailedAttempt: false });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result.map((b) => b.paymentStatus)).toEqual(['PENDING', 'PENDING']);
+    expect(prisma.booking.update).not.toHaveBeenCalled();
+  });
+
+  it('does not let one failed Stripe lookup break the rest of the list', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+      { id: 'b2', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_2' },
+    ]);
+    stripeService.getPaymentIntentStatus
+      .mockRejectedValueOnce(new Error('Stripe API down'))
+      .mockResolvedValueOnce({ status: 'succeeded', hasFailedAttempt: false });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result.find((b) => b.id === 'b1')?.paymentStatus).toBe('PENDING');
+    expect(result.find((b) => b.id === 'b2')?.paymentStatus).toBe('PAID');
   });
 });
 
