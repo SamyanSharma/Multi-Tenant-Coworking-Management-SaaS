@@ -46,13 +46,21 @@ function CheckoutForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // useStripe() returns truthy as soon as Stripe.js itself loads —
+  // that's independent of whether THIS PaymentElement actually
+  // mounted successfully for the given clientSecret. Without tracking
+  // that separately, a bad/mismatched clientSecret (e.g. the
+  // publishable key belonging to a different Stripe account than the
+  // one that created the PaymentIntent) leaves the Pay button
+  // clickable, and confirmPayment() throws an unhandled
+  // IntegrationError instead of ever explaining what went wrong.
+  const [elementReady, setElementReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    // Stripe.js/Elements haven't finished loading yet — the button is
-    // disabled in this state too, but guard the handler itself in
-    // case of a stray double-submit.
-    if (!stripe || !elements) return;
+    if (!stripe || !elements || !elementReady) return;
 
     setSubmitting(true);
     setError(null);
@@ -78,7 +86,29 @@ function CheckoutForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <PaymentElement />
+      <PaymentElement
+        onReady={() => setElementReady(true)}
+        onLoadError={(event) => {
+          setLoadError(
+            event.error.message ??
+              'Could not load the payment form — please try again shortly.',
+          );
+        }}
+      />
+
+      {loadError && (
+        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm text-red-700">{loadError}</p>
+            <p className="text-xs text-red-600 mt-1">
+              This usually means a Stripe configuration problem, not
+              something wrong with your card — contact support instead
+              of retrying.
+            </p>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -89,7 +119,7 @@ function CheckoutForm({
 
       <button
         type="submit"
-        disabled={!stripe || submitting}
+        disabled={!stripe || !elementReady || submitting || !!loadError}
         className="w-full inline-flex items-center justify-center gap-2 bg-slate-900
                  text-white rounded-lg px-4 py-3 text-sm font-medium
                  hover:bg-slate-800 transition-all disabled:opacity-50
@@ -99,6 +129,11 @@ function CheckoutForm({
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
             Processing payment...
+          </>
+        ) : !elementReady && !loadError ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Loading payment form...
           </>
         ) : (
           <>
