@@ -19,6 +19,10 @@ export interface CreatedBooking {
   amountCents: number | null;
   paymentStatus: 'UNPAID' | 'PENDING' | 'PAID' | 'FAILED';
   clientSecret: string | null;
+  // ISO string, or null for UNPAID/PAID bookings (not a temporary
+  // hold — see schema.prisma's Booking.holdExpiresAt comment). Past
+  // this timestamp the backend releases the slot automatically.
+  holdExpiresAt: string | null;
 }
 
 interface BookingState {

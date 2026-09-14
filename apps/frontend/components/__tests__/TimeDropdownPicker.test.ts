@@ -14,6 +14,14 @@ describe('to24h', () => {
     expect(to24h({ hour12: 9, minute: '00', period: 'AM' })).toBe('09:00');
   });
 
+  it('converts quarter-past correctly', () => {
+    expect(to24h({ hour12: 9, minute: '15', period: 'AM' })).toBe('09:15');
+  });
+
+  it('converts quarter-to correctly', () => {
+    expect(to24h({ hour12: 9, minute: '45', period: 'AM' })).toBe('09:45');
+  });
+
   it('converts a plain afternoon hour correctly', () => {
     expect(to24h({ hour12: 9, minute: '30', period: 'PM' })).toBe('21:30');
   });
@@ -40,12 +48,16 @@ describe('from24h', () => {
     expect(from24h('21:30')).toEqual({ hour12: 9, minute: '30', period: 'PM' });
   });
 
-  it('round-trips every half-hour slot in a day through to24h(from24h(x)) === x', () => {
+  it('round-trips every 15-minute slot in a day through to24h(from24h(x)) === x', () => {
     for (let h = 0; h < 24; h++) {
-      for (const m of ['00', '30'] as const) {
+      for (const m of ['00', '15', '30', '45'] as const) {
         const original = `${String(h).padStart(2, '0')}:${m}`;
         expect(to24h(from24h(original))).toBe(original);
       }
     }
+  });
+
+  it('falls back to :00 for a minute value outside the four allowed increments', () => {
+    expect(from24h('09:37')).toEqual({ hour12: 9, minute: '00', period: 'AM' });
   });
 });

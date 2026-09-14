@@ -36,6 +36,7 @@ interface ActivePayment {
   bookingId: string;
   clientSecret: string;
   amountCents: number;
+  holdExpiresAt: string | null;
 }
 
 type FilterType = 'all' | 'upcoming' | 'past' | 'desk' | 'room';
@@ -104,6 +105,7 @@ export default function BookingsPage() {
         bookingId,
         clientSecret: body.clientSecret,
         amountCents: body.amountCents ?? 0,
+        holdExpiresAt: body.holdExpiresAt ?? null,
       });
     } catch {
       setRetryError('Network error — please try again.');
@@ -436,6 +438,7 @@ export default function BookingsPage() {
             <PaymentStep
               clientSecret={activePayment.clientSecret}
               amountCents={activePayment.amountCents}
+              holdExpiresAt={activePayment.holdExpiresAt}
               onPaid={() => {
                 setActivePayment(null);
                 fetchBookings(false);

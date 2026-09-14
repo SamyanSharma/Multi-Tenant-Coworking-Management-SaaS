@@ -3,10 +3,7 @@
 import { useEffect, useRef } from 'react';
 
 const HOURS_12 = Array.from({ length: 12 }, (_, i) => i + 1); // 1..12
-// Matches the 30-minute granularity the app has always used
-// (previously TIME_SLOTS in TimeSlotPicker.tsx) — the backend has no
-// concept of finer-grained slots than this.
-const MINUTES = ['00', '30'] as const;
+const MINUTES = ['00', '15', '30', '45'] as const;
 type Period = 'AM' | 'PM';
 
 export interface Parts {
@@ -21,15 +18,14 @@ export function to24h({ hour12, minute, period }: Parts): string {
 }
 
 export function from24h(hhmm: string): Parts {
-  const [hStr, minute] = hhmm.split(':');
+  const [hStr, minuteStr] = hhmm.split(':');
   const h = Number(hStr);
   const period: Period = h < 12 ? 'AM' : 'PM';
   const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return {
-    hour12,
-    minute: (minute === '30' ? '30' : '00') as Parts['minute'],
-    period,
-  };
+  const minute = MINUTES.includes(minuteStr as Parts['minute'])
+    ? (minuteStr as Parts['minute'])
+    : '00';
+  return { hour12, minute, period };
 }
 
 interface TimeDropdownPickerProps {
