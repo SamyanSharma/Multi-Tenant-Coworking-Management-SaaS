@@ -88,9 +88,17 @@ export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
                 >
                   <div>
                     <div className="font-medium">{desk.name}</div>
-                    <div className="text-xs">{booked ? 'Booked' : 'Available'}</div>
+                    <div className="text-xs">{booked ? 'Occupied now' : 'Available now'}</div>
                   </div>
-                  {canBook && !booked && (
+                  {/* Always shown for MEMBER, regardless of current
+                      booked-right-now status — a desk booked right
+                      now can still be booked for a different, later
+                      time. The booking page's own availability-aware
+                      calendar (lib/availability.ts) is what actually
+                      prevents overlapping bookings; this label is
+                      just "is someone here right now," not "is this
+                      desk bookable at all." */}
+                  {canBook && (
                     <Link
                       href={`/dashboard/book/desk/${desk.id}`}
                       className="inline-flex items-center justify-center bg-slate-900 text-white
@@ -125,10 +133,10 @@ export default function FloorPlan({ zoneId, desks, rooms }: FloorPlanProps) {
                   <div>
                     <div className="font-medium">{room.name}</div>
                     <div className="text-xs">
-                      {booked ? 'Booked' : 'Available'} · cap {room.capacity}
+                      {booked ? 'Occupied now' : 'Available now'} · cap {room.capacity}
                     </div>
                   </div>
-                  {canBook && !booked && (
+                  {canBook && (
                     <Link
                       href={`/dashboard/book/room/${room.id}`}
                       className="inline-flex items-center justify-center bg-slate-900 text-white

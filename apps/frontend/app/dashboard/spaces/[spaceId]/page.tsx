@@ -240,7 +240,7 @@ export default function SpaceDetailPage() {
           
           {role === 'SPACE_MANAGER' && (
             <button
-              onClick={() => router.push(`/dashboard/spaces/${space.id}/zones/new`)}
+              onClick={() => router.push('/dashboard/zones/new')}
               className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 
                        text-white rounded-lg text-sm font-medium hover:bg-slate-800 
                        transition-all"
@@ -296,7 +296,7 @@ export default function SpaceDetailPage() {
             <p className="text-sm text-slate-500 mb-1">No zones in this space yet.</p>
             {role === 'SPACE_MANAGER' && (
               <button
-                onClick={() => router.push(`/dashboard/spaces/${space.id}/zones/new`)}
+                onClick={() => router.push('/dashboard/zones/new')}
                 className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-slate-900 
                          text-white rounded-lg text-sm font-medium hover:bg-slate-800 
                          transition-all"
