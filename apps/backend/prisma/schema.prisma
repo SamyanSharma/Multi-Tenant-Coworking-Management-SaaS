@@ -108,6 +108,16 @@ model Booking {
   amountCents           Int?
   stripePaymentIntentId String?       @unique
 
+  // Set only while this booking is "holding" a slot without having
+  // actually paid yet (PENDING = payment in progress, or FAILED = a
+  // payment attempt was declined but the user hasn't rebooked). Null
+  // for UNPAID (no payment needed at all -- not a hold, a completed
+  // booking) and for PAID (the hold has been fully honored, no longer
+  // temporary). bookings.service.ts deletes any booking past this
+  // timestamp before it can block a new booking attempt on the same
+  // slot -- same idea as a movie-ticket seat hold expiring.
+  holdExpiresAt DateTime?
+
   @@unique([bookableType, bookableId, startTime])
   @@index([bookableType, bookableId])
   @@index([userId])

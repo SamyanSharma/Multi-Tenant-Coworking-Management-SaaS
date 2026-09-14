@@ -292,6 +292,7 @@ export default function BookResourcePage() {
                 <PaymentStep
                   clientSecret={pendingPayment.clientSecret!}
                   amountCents={pendingPayment.amountCents ?? 0}
+                  holdExpiresAt={pendingPayment.holdExpiresAt}
                   onPaid={() => router.push('/dashboard/bookings')}
                 />
               </div>

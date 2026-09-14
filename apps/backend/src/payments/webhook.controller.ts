@@ -82,6 +82,7 @@ export class WebhookController {
           data: {
             paymentStatus: 'PAID',
             stripePaymentIntentId: paymentIntent.id,
+            holdExpiresAt: null,
           },
         });
 

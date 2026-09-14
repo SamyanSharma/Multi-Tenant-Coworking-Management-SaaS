@@ -16,6 +16,14 @@ const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 const PRISMA_EXCLUSION_CONSTRAINT_VIOLATION = 'P2039';
 const POSTGRES_EXCLUSION_VIOLATION = '23P01';
 
+// How long a PENDING or FAILED (declined-but-not-yet-retried) booking
+// holds its slot before it's treated as abandoned and released — same
+// idea as a movie-ticket seat hold. 15 minutes chosen to match the
+// new 15-minute time-slot granularity elsewhere in this change; not a
+// value the person building this system stated, so worth revisiting
+// if a different hold window is wanted.
+const HOLD_DURATION_MINUTES = 15;
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -115,7 +123,43 @@ export class BookingsService {
       },
     });
 
-    return this.reconcilePendingPayments(bookings);
+    const active = await this.expireStaleHolds(bookings);
+
+    return this.reconcilePendingPayments(active);
+  }
+
+  // A held slot (PENDING or FAILED with holdExpiresAt in the past) is
+  // deleted outright, not just hidden — leaving the row around would
+  // still block that time range via the no_overlapping_bookings
+  // exclusion constraint even though nobody's actually holding it
+  // anymore, the exact bug this feature exists to prevent.
+  private async expireStaleHolds<
+    T extends {
+      id: string;
+      paymentStatus: string;
+      holdExpiresAt: Date | null;
+    },
+  >(bookings: T[]): Promise<T[]> {
+    const now = new Date();
+
+    const expired = bookings.filter(
+      (b) =>
+        (b.paymentStatus === 'PENDING' || b.paymentStatus === 'FAILED') &&
+        b.holdExpiresAt !== null &&
+        b.holdExpiresAt < now,
+    );
+
+    if (expired.length === 0) {
+      return bookings;
+    }
+
+    await this.prisma.booking.deleteMany({
+      where: { id: { in: expired.map((b) => b.id) } },
+    });
+
+    const expiredIds = new Set(expired.map((b) => b.id));
+
+    return bookings.filter((b) => !expiredIds.has(b.id));
   }
 
   // Self-heals bookings stuck at PENDING because
@@ -192,7 +236,14 @@ export class BookingsService {
       toUpdate.map((update) =>
         this.prisma.booking.update({
           where: { id: update.id },
-          data: { paymentStatus: update.resolvedStatus },
+          data: {
+            paymentStatus: update.resolvedStatus,
+            // Only PAID clears the hold — FAILED still needs it (a
+            // FAILED booking is still holding the slot until either
+            // retried or its hold expires; see expireStaleHolds).
+            holdExpiresAt:
+              update.resolvedStatus === 'PAID' ? null : undefined,
+          },
         }),
       ),
     );
@@ -283,7 +334,18 @@ export class BookingsService {
       );
     }
 
-
+    // Free up any abandoned hold on this exact resource first — a
+    // PENDING booking nobody ever paid for (or a FAILED one nobody
+    // retried) would otherwise still block this create() attempt via
+    // the DB's exclusion constraint even though it's long abandoned.
+    await this.prisma.booking.deleteMany({
+      where: {
+        bookableType,
+        bookableId,
+        paymentStatus: { in: ['PENDING', 'FAILED'] },
+        holdExpiresAt: { lt: new Date() },
+      },
+    });
 
     try {
 
@@ -440,6 +502,21 @@ export class BookingsService {
       );
     }
 
+    if (
+      booking.paymentStatus === 'FAILED' &&
+      booking.holdExpiresAt &&
+      booking.holdExpiresAt < new Date()
+    ) {
+      // The hold already lapsed — don't quietly resurrect it with a
+      // fresh PaymentIntent, since someone else may have booked this
+      // slot in the meantime. Delete it and tell them to start over,
+      // same as the automatic expiry paths in create()/findAllForSpace.
+      await this.prisma.booking.delete({ where: { id: booking.id } });
+      throw new BadRequestException(
+        'Your hold on this slot expired — please book again.',
+      );
+    }
+
     if (booking.amountCents === null) {
       throw new BadRequestException(
         'This booking has no price attached — cannot create a payment',
@@ -490,6 +567,14 @@ export class BookingsService {
       data: {
         paymentStatus: 'PENDING',
         stripePaymentIntentId: paymentIntent.id,
+        // Refreshed on every call, including retries — a retry means
+        // the user is actively engaged right now, so they get a full
+        // fresh window rather than inheriting whatever was left of
+        // the original hold (which may already be seconds from
+        // expiring, undermining the point of letting them retry).
+        holdExpiresAt: new Date(
+          Date.now() + HOLD_DURATION_MINUTES * 60 * 1000,
+        ),
       },
     });
 

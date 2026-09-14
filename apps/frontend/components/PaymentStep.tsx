@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import {
   Elements,
   PaymentElement,
@@ -8,12 +8,50 @@ import {
   useElements,
 } from '@stripe/react-stripe-js';
 import { getStripe } from '@/lib/stripe';
-import { Loader2, AlertCircle, CreditCard } from 'lucide-react';
+import { Loader2, AlertCircle, CreditCard, Clock } from 'lucide-react';
 
 interface PaymentStepProps {
   clientSecret: string;
   amountCents: number;
   onPaid: () => void;
+  // ISO string — when this booking's temporary hold on the slot
+  // releases if payment isn't completed by then (see
+  // schema.prisma's Booking.holdExpiresAt). Omit/null to hide the
+  // countdown (shouldn't normally happen for a PENDING booking, but
+  // this component shouldn't hard-fail if it does).
+  holdExpiresAt?: string | null;
+}
+
+function useCountdown(targetIso: string | null | undefined) {
+  const [remainingMs, setRemainingMs] = useState<number | null>(
+    targetIso ? new Date(targetIso).getTime() - Date.now() : null,
+  );
+
+  useEffect(() => {
+    if (!targetIso) {
+      setRemainingMs(null);
+      return;
+    }
+
+    const target = new Date(targetIso).getTime();
+
+    function tick() {
+      setRemainingMs(Math.max(0, target - Date.now()));
+    }
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [targetIso]);
+
+  return remainingMs;
+}
+
+export function formatRemaining(ms: number): string {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 // Wraps Stripe's <Elements> provider around the actual form —
@@ -23,13 +61,18 @@ export default function PaymentStep({
   clientSecret,
   amountCents,
   onPaid,
+  holdExpiresAt,
 }: PaymentStepProps) {
   return (
     <Elements
       stripe={getStripe()}
       options={{ clientSecret, appearance: { theme: 'stripe' } }}
     >
-      <CheckoutForm amountCents={amountCents} onPaid={onPaid} />
+      <CheckoutForm
+        amountCents={amountCents}
+        onPaid={onPaid}
+        holdExpiresAt={holdExpiresAt}
+      />
     </Elements>
   );
 }
@@ -37,9 +80,11 @@ export default function PaymentStep({
 function CheckoutForm({
   amountCents,
   onPaid,
+  holdExpiresAt,
 }: {
   amountCents: number;
   onPaid: () => void;
+  holdExpiresAt?: string | null;
 }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -57,10 +102,19 @@ function CheckoutForm({
   const [elementReady, setElementReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const remainingMs = useCountdown(holdExpiresAt);
+  // Backend is the real enforcer (see bookings.service.ts's
+  // expireStaleHolds) — this is purely so the person isn't sitting on
+  // a form that can no longer succeed with no explanation, and to
+  // stop them submitting a card charge attempt against a slot that's
+  // already been released to someone else.
+  const holdExpired = remainingMs !== null && remainingMs <= 0;
+  const holdUrgent = remainingMs !== null && remainingMs <= 60_000;
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    if (!stripe || !elements || !elementReady) return;
+    if (!stripe || !elements || !elementReady || holdExpired) return;
 
     setSubmitting(true);
     setError(null);
@@ -86,6 +140,39 @@ function CheckoutForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {remainingMs !== null && !holdExpired && (
+        <div
+          className={`flex items-center gap-2 p-2.5 rounded-lg text-sm ${
+            holdUrgent
+              ? 'bg-red-50 text-red-700 border border-red-200'
+              : 'bg-slate-50 text-slate-600 border border-slate-200'
+          }`}
+        >
+          <Clock className="w-4 h-4 shrink-0" />
+          <span>
+            Held for you — complete payment within{' '}
+            <span className="font-semibold tabular-nums">
+              {formatRemaining(remainingMs)}
+            </span>
+          </span>
+        </div>
+      )}
+
+      {holdExpired && (
+        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-red-800">
+              Your hold on this slot expired
+            </p>
+            <p className="text-sm text-red-700 mt-0.5">
+              This slot may now be available to others. Please go back
+              and book again.
+            </p>
+          </div>
+        </div>
+      )}
+
       <PaymentElement
         onReady={() => setElementReady(true)}
         onLoadError={(event) => {
@@ -119,7 +206,9 @@ function CheckoutForm({
 
       <button
         type="submit"
-        disabled={!stripe || !elementReady || submitting || !!loadError}
+        disabled={
+          !stripe || !elementReady || submitting || !!loadError || holdExpired
+        }
         className="w-full inline-flex items-center justify-center gap-2 bg-slate-900
                  text-white rounded-lg px-4 py-3 text-sm font-medium
                  hover:bg-slate-800 transition-all disabled:opacity-50
