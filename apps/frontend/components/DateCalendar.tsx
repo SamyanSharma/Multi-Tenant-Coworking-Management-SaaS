@@ -7,6 +7,11 @@ interface DateCalendarProps {
   selected: Date | null;
   onSelect: (date: Date) => void;
   minDate?: Date;
+  // Additional disabling on top of the past-date floor — used to gray
+  // out days that are fully booked end-to-end, so the calendar itself
+  // reflects real availability instead of only rejecting a pick after
+  // the fact at submit time.
+  isDateDisabled?: (date: Date) => boolean;
 }
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -25,7 +30,12 @@ function startOfDay(d: Date): Date {
   return copy;
 }
 
-export default function DateCalendar({ selected, onSelect, minDate }: DateCalendarProps) {
+export default function DateCalendar({
+  selected,
+  onSelect,
+  minDate,
+  isDateDisabled,
+}: DateCalendarProps) {
   const today = startOfDay(new Date());
   const floor = minDate ? startOfDay(minDate) : today;
 
@@ -89,7 +99,9 @@ export default function DateCalendar({ selected, onSelect, minDate }: DateCalend
         {cells.map((date, i) => {
           if (!date) return <div key={`empty-${i}`} />;
 
-          const disabled = date < floor;
+          const isPast = date < floor;
+          const isFullyBooked = !isPast && (isDateDisabled?.(date) ?? false);
+          const disabled = isPast || isFullyBooked;
           const isSelected = selected && isSameDay(date, selected);
           const isToday = isSameDay(date, today);
 
@@ -99,9 +111,11 @@ export default function DateCalendar({ selected, onSelect, minDate }: DateCalend
               type="button"
               disabled={disabled}
               onClick={() => onSelect(date)}
+              title={isFullyBooked ? 'Fully booked' : undefined}
               className={`
                 aspect-square rounded text-sm transition-colors
                 ${disabled ? 'text-slate-300 cursor-not-allowed' : 'text-slate-700 hover:bg-blue-50 cursor-pointer'}
+                ${isFullyBooked ? 'line-through decoration-slate-300' : ''}
                 ${isSelected ? 'bg-blue-600 text-white hover:bg-blue-600 font-semibold' : ''}
                 ${isToday && !isSelected ? 'ring-1 ring-inset ring-blue-300' : ''}
               `}
