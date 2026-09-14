@@ -268,7 +268,7 @@ describe('BookingsService.findAllForSpace — payment reconciliation', () => {
     expect(result[0].paymentStatus).toBe('PAID');
     expect(prisma.booking.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
-      data: { paymentStatus: 'PAID' },
+      data: { paymentStatus: 'PAID', holdExpiresAt: null },
     });
   });
 
