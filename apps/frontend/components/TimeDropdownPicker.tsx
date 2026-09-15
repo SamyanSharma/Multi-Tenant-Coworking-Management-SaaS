@@ -38,15 +38,20 @@ interface TimeDropdownPickerProps {
   // uncontrolled-looking default without this would show e.g. "9:00
   // AM" while the parent still thinks nothing has been picked yet).
   defaultValue?: string;
-  // Shown inline below the dropdowns when the currently selected
-  // combination isn't actually valid (in the past, or overlapping an
-  // existing booking) — native <select> can't gray out individual
-  // options based on a live combination of three separate dropdowns,
-  // so this app surfaces it as feedback instead, the same pattern
-  // widely-used SaaS schedulers (e.g. Calendly) use for free-form
-  // time entry.
+  // Still shown for messages that aren't about a specific time being
+  // unavailable (e.g. "End must be after start" before any end time
+  // is picked at all) — anything the isDisabled check below can
+  // express is handled by disabling the option instead.
   warning?: string | null;
   disabled?: boolean;
+  // Given a combined "HH:mm" 24h string, returns whether that exact
+  // time is unavailable (in the past, or overlapping an existing
+  // booking). Checked per-option, live, against the OTHER two
+  // dropdowns' current values — so e.g. changing the hour immediately
+  // grays out any now-invalid minutes for that hour, the same way
+  // DateCalendar grays out fully-booked days rather than only
+  // reporting a conflict after the fact.
+  isTimeDisabled?: (hhmm: string) => boolean;
 }
 
 export default function TimeDropdownPicker({
@@ -55,6 +60,7 @@ export default function TimeDropdownPicker({
   defaultValue = '09:00',
   warning,
   disabled = false,
+  isTimeDisabled,
 }: TimeDropdownPickerProps) {
   const hasAppliedDefault = useRef(false);
 
@@ -71,6 +77,29 @@ export default function TimeDropdownPicker({
     onChange(to24h({ ...parts, ...next }));
   }
 
+  // "Is this candidate combo (this option's value, with the OTHER two
+  // dropdowns held at their current selection) unavailable" — this is
+  // what makes the filtering live and cross-dropdown: picking a
+  // different hour immediately re-evaluates which minutes are grayed
+  // out for that hour, and vice versa.
+  const hourDisabled = (hour12: number) =>
+    isTimeDisabled?.(to24h({ ...parts, hour12 })) ?? false;
+  const minuteDisabled = (minute: Parts['minute']) =>
+    isTimeDisabled?.(to24h({ ...parts, minute })) ?? false;
+  const periodDisabled = (period: Period) =>
+    isTimeDisabled?.(to24h({ ...parts, period })) ?? false;
+
+  // If isTimeDisabled makes literally every option in a dropdown
+  // unavailable (e.g. a fully-booked resource whose only open day left
+  // has zero valid start times), disabling every <option> would leave
+  // the select with nothing choosable at all. Rather than do that,
+  // fall back to enabling everything and let the existing warning/
+  // validation messaging explain why — this only happens in an edge
+  // case DateCalendar's isDayFullyOccupied should normally have
+  // already screened out at the date level.
+  const allHoursDisabled = isTimeDisabled ? HOURS_12.every(hourDisabled) : false;
+  const allMinutesDisabled = isTimeDisabled ? MINUTES.every(minuteDisabled) : false;
+
   const selectClass =
     'px-3 py-2 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed ' +
     (warning ? 'border-amber-300' : 'border-slate-300');
@@ -86,7 +115,7 @@ export default function TimeDropdownPicker({
           className={selectClass}
         >
           {HOURS_12.map((h) => (
-            <option key={h} value={h}>
+            <option key={h} value={h} disabled={!allHoursDisabled && hourDisabled(h)}>
               {h}
             </option>
           ))}
@@ -104,7 +133,7 @@ export default function TimeDropdownPicker({
           className={selectClass}
         >
           {MINUTES.map((m) => (
-            <option key={m} value={m}>
+            <option key={m} value={m} disabled={!allMinutesDisabled && minuteDisabled(m)}>
               {m}
             </option>
           ))}
@@ -117,8 +146,12 @@ export default function TimeDropdownPicker({
           onChange={(e) => update({ period: e.target.value as Period })}
           className={selectClass}
         >
-          <option value="AM">AM</option>
-          <option value="PM">PM</option>
+          <option value="AM" disabled={periodDisabled('AM') && !periodDisabled('PM')}>
+            AM
+          </option>
+          <option value="PM" disabled={periodDisabled('PM') && !periodDisabled('AM')}>
+            PM
+          </option>
         </select>
       </div>
 
