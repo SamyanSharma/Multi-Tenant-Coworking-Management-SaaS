@@ -150,6 +150,32 @@ export default function BookResourcePage() {
     startDateTime && endDateTime ? endDateTime.getTime() <= startDateTime.getTime() : false;
   const endWarning = endBeforeStart ? 'End must be after start.' : null;
 
+  // Per-option filtering for the start-time dropdowns: a candidate
+  // "HH:mm" is unavailable if it's already passed, or if that instant
+  // falls inside an existing booking on this resource. Recomputed on
+  // every render so changing the hour/minute/period live re-grays the
+  // other two dropdowns' options — see TimeDropdownPicker's
+  // isTimeDisabled prop.
+  const isStartTimeDisabled = (hhmm: string): boolean => {
+    if (!startDate) return false;
+    const candidate = combineDateAndTime(startDate, hhmm);
+    if (candidate.getTime() < now.getTime()) return true;
+    return occupied.some((iv) => candidate >= iv.start && candidate < iv.end);
+  };
+
+  // For the end-time dropdowns: a candidate is unavailable if it isn't
+  // strictly after the chosen start, or if the resulting [start, end)
+  // range would overlap an existing booking anywhere in between (not
+  // just at the end instant itself) — mirrors the backend's exclusion
+  // constraint via isRangeOccupied, same as the authoritative
+  // rangeConflict check below.
+  const isEndTimeDisabled = (hhmm: string): boolean => {
+    if (!endDate || !startDateTime) return false;
+    const candidate = combineDateAndTime(endDate, hhmm);
+    if (candidate.getTime() <= startDateTime.getTime()) return true;
+    return isRangeOccupied(startDateTime, candidate, occupied);
+  };
+
   // The authoritative check — mirrors the backend's exclusion
   // constraint exactly (see lib/availability.ts) — catches cases
   // where neither the start nor end instant individually lands inside
@@ -347,6 +373,7 @@ export default function BookResourcePage() {
                   value={startSlot}
                   onChange={handleSelectStartSlot}
                   warning={startWarning}
+                  isTimeDisabled={isStartTimeDisabled}
                 />
               </div>
             )}
@@ -378,6 +405,7 @@ export default function BookResourcePage() {
                   onChange={setEndSlot}
                   defaultValue="10:00"
                   warning={endWarning}
+                  isTimeDisabled={isEndTimeDisabled}
                 />
               </div>
             )}
