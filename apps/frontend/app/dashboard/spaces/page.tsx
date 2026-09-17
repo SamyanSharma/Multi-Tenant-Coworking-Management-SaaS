@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { getAuthHeaders } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { 
@@ -11,7 +10,6 @@ import {
   AlertCircle, 
   RefreshCw,
   ArrowRight,
-  Plus,
   Users,
   MapPin,
   CalendarDays,
@@ -33,7 +31,6 @@ export default function SpacesPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const role = useAuthStore((s) => s.role);
-  const router = useRouter();
 
   const fetchSpaces = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -135,17 +132,14 @@ export default function SpacesPage() {
             Refresh
           </button>
           
-          {role === 'SPACE_MANAGER' && (
-            <button
-              onClick={() => router.push('/dashboard/spaces/new')}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 
-                       text-white rounded-lg text-sm font-medium hover:bg-slate-800 
-                       transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              New Space
-            </button>
-          )}
+          {/* "New Space" removed: under the current model a Space
+              Manager is tied to exactly one space, set at signup —
+              there's no backend support for creating a second one
+              (POST /spaces is PLATFORM_ADMIN-only), and this button
+              pointed at a page that was never built (fell through to
+              the [spaceId] dynamic route with the literal string
+              "new" as the id). Revisit if/when multi-space management
+              per manager is actually built. */}
         </div>
       </div>
 
