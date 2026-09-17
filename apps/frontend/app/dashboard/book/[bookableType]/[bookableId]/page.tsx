@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useBookingStore, BookableType, CreatedBooking } from '@/store/bookingStore';
 import { getAuthHeaders } from '@/lib/api';
@@ -22,14 +22,6 @@ import {
   CalendarDays,
   Zap,
 } from 'lucide-react';
-
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
 
 // Combines a calendar date with an "HH:mm" string into a local-time
 // Date object — same local-time semantics the old datetime-local input
@@ -134,55 +126,42 @@ export default function BookResourcePage() {
     [endDate, endSlot],
   );
 
-  // Proactive feedback, computed live as the user picks — rather than
-  // only finding out from a 409 after clicking Confirm.
-  const startInPast = startDateTime ? startDateTime.getTime() < now.getTime() : false;
-  const startInstantOccupied = startDateTime
-    ? occupied.some((iv) => startDateTime >= iv.start && startDateTime < iv.end)
-    : false;
-  const startWarning = startInPast
-    ? 'This time has already passed.'
-    : startInstantOccupied
-      ? 'This time is already booked.'
-      : null;
+  // Drives which options TimeDropdownPicker actually lists — a start
+  // time is valid if it isn't in the past and doesn't land inside an
+  // existing booking. New function identity whenever startDate/
+  // occupied change is what tells the picker to re-filter and
+  // possibly re-pick its default.
+  const isStartTimeValid = useCallback(
+    (hhmm: string) => {
+      if (!startDate) return false;
+      const candidate = combineDateAndTime(startDate, hhmm);
+      if (candidate.getTime() < now.getTime()) return false;
+      return !occupied.some((iv) => candidate >= iv.start && candidate < iv.end);
+    },
+    [startDate, occupied, now],
+  );
 
-  const endBeforeStart =
-    startDateTime && endDateTime ? endDateTime.getTime() <= startDateTime.getTime() : false;
-  const endWarning = endBeforeStart ? 'End must be after start.' : null;
+  // An end time is valid only if the FULL [start, end) range it would
+  // produce doesn't overlap anything — not just the end instant
+  // itself. This is what catches "9am-5pm swallows a noon booking"
+  // without needing a separate range-conflict banner: an end time
+  // that would create that overlap simply never appears as an option.
+  const isEndTimeValid = useCallback(
+    (hhmm: string) => {
+      if (!endDate || !startDateTime) return false;
+      const candidate = combineDateAndTime(endDate, hhmm);
+      if (candidate.getTime() <= startDateTime.getTime()) return false;
+      return !isRangeOccupied(startDateTime, candidate, occupied);
+    },
+    [endDate, startDateTime, occupied],
+  );
 
-  // Per-option filtering for the start-time dropdowns: a candidate
-  // "HH:mm" is unavailable if it's already passed, or if that instant
-  // falls inside an existing booking on this resource. Recomputed on
-  // every render so changing the hour/minute/period live re-grays the
-  // other two dropdowns' options — see TimeDropdownPicker's
-  // isTimeDisabled prop.
-  const isStartTimeDisabled = (hhmm: string): boolean => {
-    if (!startDate) return false;
-    const candidate = combineDateAndTime(startDate, hhmm);
-    if (candidate.getTime() < now.getTime()) return true;
-    return occupied.some((iv) => candidate >= iv.start && candidate < iv.end);
-  };
-
-  // For the end-time dropdowns: a candidate is unavailable if it isn't
-  // strictly after the chosen start, or if the resulting [start, end)
-  // range would overlap an existing booking anywhere in between (not
-  // just at the end instant itself) — mirrors the backend's exclusion
-  // constraint via isRangeOccupied, same as the authoritative
-  // rangeConflict check below.
-  const isEndTimeDisabled = (hhmm: string): boolean => {
-    if (!endDate || !startDateTime) return false;
-    const candidate = combineDateAndTime(endDate, hhmm);
-    if (candidate.getTime() <= startDateTime.getTime()) return true;
-    return isRangeOccupied(startDateTime, candidate, occupied);
-  };
-
-  // The authoritative check — mirrors the backend's exclusion
-  // constraint exactly (see lib/availability.ts) — catches cases
-  // where neither the start nor end instant individually lands inside
-  // an existing booking, but the full range still swallows one
-  // (e.g. picking 9am-5pm when something exists at noon).
+  // Defensive fallback only — TimeDropdownPicker's own filtering
+  // should make this impossible in normal use, but a stale selection
+  // (e.g. someone else books the gap between render and submit) is
+  // still worth catching before hitting the backend.
   const rangeConflict =
-    startDateTime && endDateTime && !endBeforeStart
+    startDateTime && endDateTime && endDateTime.getTime() > startDateTime.getTime()
       ? isRangeOccupied(startDateTime, endDateTime, occupied)
       : false;
 
@@ -228,7 +207,7 @@ export default function BookResourcePage() {
       setValidationError('End must be after start.');
       return false;
     }
-    if (startInPast) {
+    if (startDateTime.getTime() < now.getTime()) {
       setValidationError('Start time has already passed — pick a later time.');
       return false;
     }
@@ -279,8 +258,8 @@ export default function BookResourcePage() {
     !isSubmitting &&
     !!startDateTime &&
     !!endDateTime &&
-    !startInPast &&
-    !endBeforeStart &&
+    endDateTime.getTime() > startDateTime.getTime() &&
+    startDateTime.getTime() >= now.getTime() &&
     !rangeConflict;
 
   return (
@@ -362,7 +341,7 @@ export default function BookResourcePage() {
               />
             </div>
 
-            {/* Start time */}
+            {/* Start time — only genuinely available times are listed */}
             {startDate && (
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
@@ -372,8 +351,7 @@ export default function BookResourcePage() {
                 <TimeDropdownPicker
                   value={startSlot}
                   onChange={handleSelectStartSlot}
-                  warning={startWarning}
-                  isTimeDisabled={isStartTimeDisabled}
+                  isValid={isStartTimeValid}
                 />
               </div>
             )}
@@ -389,11 +367,13 @@ export default function BookResourcePage() {
                   selected={endDate}
                   onSelect={handleSelectEndDate}
                   minDate={startDate}
+                  isDateDisabled={(date) => isDayFullyOccupied(date, occupied)}
                 />
               </div>
             )}
 
-            {/* End time */}
+            {/* End time — only options that produce a non-overlapping
+                full range are listed, not just a free end instant */}
             {endDate && (
               <div>
                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
@@ -404,8 +384,7 @@ export default function BookResourcePage() {
                   value={endSlot}
                   onChange={setEndSlot}
                   defaultValue="10:00"
-                  warning={endWarning}
-                  isTimeDisabled={isEndTimeDisabled}
+                  isValid={isEndTimeValid}
                 />
               </div>
             )}
@@ -416,15 +395,6 @@ export default function BookResourcePage() {
                 <span>
                   {formatDateTime(startDateTime)} &nbsp;→&nbsp; {formatDateTime(endDateTime)}
                 </span>
-              </div>
-            )}
-
-            {rangeConflict && !endBeforeStart && (
-              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                <p className="text-sm text-amber-800">
-                  This range overlaps an existing booking — pick a different time.
-                </p>
               </div>
             )}
 
