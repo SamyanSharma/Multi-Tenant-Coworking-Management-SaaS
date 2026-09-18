@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
+import { getBookingStatus, sortBookings } from '@/lib/bookingSort';
 import PaymentStep from '@/components/PaymentStep';
 import { 
   CalendarDays, 
@@ -144,16 +145,6 @@ export default function BookingsPage() {
     return filtered;
   };
 
-  const getBookingStatus = (booking: Booking) => {
-    const now = new Date();
-    const start = new Date(booking.startTime);
-    const end = new Date(booking.endTime);
-    
-    if (end < now) return 'completed';
-    if (start <= now && end >= now) return 'active';
-    return 'upcoming';
-  };
-
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active':
@@ -238,7 +229,7 @@ export default function BookingsPage() {
     );
   }
 
-  const filteredBookings = filterBookings(bookings);
+  const filteredBookings = sortBookings(filterBookings(bookings));
   const stats = {
     total: bookings.length,
     upcoming: bookings.filter(b => getBookingStatus(b) === 'upcoming').length,

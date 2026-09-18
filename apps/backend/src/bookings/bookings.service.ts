@@ -121,6 +121,13 @@ export class BookingsService {
           },
         ],
       },
+      // Baseline chronological order — no explicit orderBy previously,
+      // meaning the API returned whatever order Postgres happened to
+      // give back (effectively arbitrary, not something to rely on).
+      // The frontend applies a smarter active/upcoming/completed
+      // grouping on top of this for display, but the API itself
+      // shouldn't hand back an unordered list.
+      orderBy: { startTime: 'asc' },
     });
 
     const active = await this.expireStaleHolds(bookings);
