@@ -96,8 +96,8 @@ export default function DashboardLayout({
   );
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-64 bg-slate-900 text-white p-4 flex flex-col gap-2">
+    <div className="flex h-screen overflow-hidden">
+      <aside className="w-64 h-screen shrink-0 overflow-y-auto bg-slate-900 text-white p-4 flex flex-col gap-2 shadow-xl">
         <div className="text-lg font-semibold mb-4">
           Coworking SaaS
         </div>
@@ -136,7 +136,7 @@ export default function DashboardLayout({
         )}
       </aside>
 
-      <main className="flex-1 bg-slate-50 p-6">
+      <main className="flex-1 h-screen overflow-y-auto bg-slate-50 p-6">
         {children}
       </main>
     </div>
