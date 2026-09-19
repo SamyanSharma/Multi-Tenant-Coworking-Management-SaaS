@@ -10,6 +10,7 @@ function buildDeps() {
     desk: {
       findUnique: jest.fn().mockResolvedValue({
         id: 'desk-1',
+        name: 'Desk A1',
         zone: { spaceId: 'space-1' },
       }),
       findMany: jest.fn().mockResolvedValue([{ id: 'desk-1' }]),
@@ -48,6 +49,7 @@ function buildDeps() {
     createBookingPaymentIntent: jest.fn().mockResolvedValue({
       id: 'pi_123',
       client_secret: 'pi_123_secret_abc',
+      application_fee_amount: 50,
     }),
     getPaymentIntentStatus: jest.fn(),
   };
@@ -268,7 +270,11 @@ describe('BookingsService.findAllForSpace — payment reconciliation', () => {
     expect(result[0].paymentStatus).toBe('PAID');
     expect(prisma.booking.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
-      data: { paymentStatus: 'PAID', holdExpiresAt: null },
+      data: {
+        paymentStatus: 'PAID',
+        holdExpiresAt: null,
+        paidAt: expect.any(Date),
+      },
     });
   });
 
@@ -563,5 +569,103 @@ describe('BookingsService.retryPayment', () => {
       bookingId: 'booking-1',
     });
     expect(result.clientSecret).toBe('pi_456_secret_xyz');
+  });
+});
+
+// Stage 9.1a: a Booking is financial history and must not depend on live
+// Desk/Room rows, so it snapshots its space / readable name / platform fee /
+// paid-at, and is read back by its own spaceId.
+describe('BookingsService — Stage 9 snapshots', () => {
+  const dto = () => ({
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime: FUTURE_START,
+    endTime: FUTURE_END,
+  });
+
+  it('snapshots spaceId and the desk/room name onto the new booking', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1' });
+
+    await service.create(dto(), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        spaceId: 'space-1',
+        bookableName: 'Desk A1',
+        amountCents: 1000,
+      }),
+    });
+  });
+
+  it('snapshots the exact application fee Stripe was given (not a recomputed guess)', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1' });
+
+    await service.create(dto(), 'space-1', 'user-1');
+
+    expect(prisma.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: expect.objectContaining({
+        paymentStatus: 'PENDING',
+        platformFeeCents: 50,
+      }),
+    });
+  });
+
+  it('stores a null fee snapshot when Stripe reports no application fee', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    stripeService.createBookingPaymentIntent.mockResolvedValue({
+      id: 'pi_nofee',
+      client_secret: 'secret',
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1' });
+
+    await service.create(dto(), 'space-1', 'user-1');
+
+    expect(prisma.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: expect.objectContaining({ platformFeeCents: null }),
+    });
+  });
+
+  it('lists bookings by their own spaceId — never by joining through live desk/room ids', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1');
+
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+      where: { spaceId: 'space-1' },
+      orderBy: { startTime: 'asc' },
+    });
+    // The old implementation looked up desk/room ids first; a soft-deleted
+    // desk would then have hidden its bookings. Must not happen anymore.
+    expect(prisma.desk.findMany).not.toHaveBeenCalled();
+    expect(prisma.room.findMany).not.toHaveBeenCalled();
+  });
+
+  it('still lists a booking whose desk no longer exists (history survives deletion)', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findMany.mockResolvedValue([]); // desk gone
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b-old',
+        spaceId: 'space-1',
+        bookableId: 'deleted-desk',
+        bookableName: 'Desk A1',
+        paymentStatus: 'PAID',
+        stripePaymentIntentId: 'pi_x',
+        holdExpiresAt: null,
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].bookableName).toBe('Desk A1');
   });
 });

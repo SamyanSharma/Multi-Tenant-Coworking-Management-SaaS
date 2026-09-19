@@ -41,26 +41,20 @@ export class AnalyticsService {
 
 
   async spaceSummary(spaceId: string) {
-    const [desks, rooms] = await Promise.all([
-      this.prisma.desk.findMany({
-        where: { zone: { spaceId } },
-        select: { id: true },
-      }),
-      this.prisma.room.findMany({
-        where: { zone: { spaceId } },
-        select: { id: true },
-      }),
+    // Resource counts (denominator of utilization) still come from the
+    // live desks/rooms -- that is exactly what "utilization" should mean.
+    const [deskCount, roomCount] = await Promise.all([
+      this.prisma.desk.count({ where: { zone: { spaceId } } }),
+      this.prisma.room.count({ where: { zone: { spaceId } } }),
     ]);
-    const deskIds = desks.map((d) => d.id);
-    const roomIds = rooms.map((r) => r.id);
-    const totalResourceCount = deskIds.length + roomIds.length;
+    const totalResourceCount = deskCount + roomCount;
 
-    const bookingWhere = {
-      OR: [
-        { bookableType: 'DESK' as const, bookableId: { in: deskIds } },
-        { bookableType: 'ROOM' as const, bookableId: { in: roomIds } },
-      ],
-    };
+    // Stage 9: bookings are scoped by their own spaceId snapshot, NOT by
+    // joining through live desk/room ids -- otherwise deleting a desk would
+    // silently remove its paid bookings from revenue. Cancelled bookings
+    // (deleted-resource refunds) never count as bookings; their money
+    // leaves `paymentStatus: PAID` on its own when refunded.
+    const bookingWhere = { spaceId, cancelledAt: null };
 
     const now = new Date();
 

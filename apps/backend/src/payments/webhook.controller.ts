@@ -83,6 +83,8 @@ export class WebhookController {
             paymentStatus: 'PAID',
             stripePaymentIntentId: paymentIntent.id,
             holdExpiresAt: null,
+            // Stage 9: revenue time windows key off paidAt.
+            paidAt: new Date(),
           },
         });
 

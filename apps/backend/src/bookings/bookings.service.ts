@@ -74,53 +74,12 @@ export class BookingsService {
 
 
   async findAllForSpace(spaceId: string) {
-    const [desks, rooms] = await Promise.all([
-      this.prisma.desk.findMany({
-        where: {
-          zone: { spaceId },
-        },
-        select: {
-          id: true,
-        },
-      }),
-
-      this.prisma.room.findMany({
-        where: {
-          zone: { spaceId },
-        },
-        select: {
-          id: true,
-        },
-      }),
-    ]);
-
-
-    const deskIds = desks.map(
-      (desk) => desk.id,
-    );
-
-    const roomIds = rooms.map(
-      (room) => room.id,
-    );
-
-
+    // Stage 9: scoped by the Booking's own spaceId snapshot instead of
+    // joining through live Desk/Room ids. That join would silently drop a
+    // booking's history the moment its desk/room is (soft-)deleted; the
+    // snapshot column keeps every booking visible to its space regardless.
     const bookings = await this.prisma.booking.findMany({
-      where: {
-        OR: [
-          {
-            bookableType: BookableType.DESK,
-            bookableId: {
-              in: deskIds,
-            },
-          },
-          {
-            bookableType: BookableType.ROOM,
-            bookableId: {
-              in: roomIds,
-            },
-          },
-        ],
-      },
+      where: { spaceId },
       // Baseline chronological order — no explicit orderBy previously,
       // meaning the API returned whatever order Postgres happened to
       // give back (effectively arbitrary, not something to rely on).
@@ -250,6 +209,9 @@ export class BookingsService {
             // retried or its hold expires; see expireStaleHolds).
             holdExpiresAt:
               update.resolvedStatus === 'PAID' ? null : undefined,
+            // Stage 9: revenue time windows key off paidAt.
+            paidAt:
+              update.resolvedStatus === 'PAID' ? new Date() : undefined,
           },
         }),
       ),
@@ -291,7 +253,7 @@ export class BookingsService {
     }
 
 
-    await this.resolveBookable(
+    const bookable = await this.resolveBookable(
       bookableType,
       bookableId,
       spaceId,
@@ -370,6 +332,10 @@ export class BookingsService {
                 endTime,
                 amountCents:
                   space.priceCents,
+                // Stage 9 snapshots: financial history must not depend on
+                // the live Desk/Room row (which may later be soft-deleted).
+                spaceId,
+                bookableName: bookable.name,
               },
             });
 
@@ -574,6 +540,10 @@ export class BookingsService {
       data: {
         paymentStatus: 'PENDING',
         stripePaymentIntentId: paymentIntent.id,
+        // Stage 9: the exact application fee this PaymentIntent was created
+        // with -- read back from Stripe's object rather than recomputed, so
+        // the stored number can never disagree with what was really charged.
+        platformFeeCents: paymentIntent.application_fee_amount ?? null,
         // Refreshed on every call, including retries — a retry means
         // the user is actively engaged right now, so they get a full
         // fresh window rather than inheriting whatever was left of
