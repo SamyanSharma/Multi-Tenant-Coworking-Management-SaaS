@@ -16,15 +16,13 @@ function buildPrismaMock(opts: {
   previousPeriodPaidAmounts: number[];
 }) {
   return {
+    // Stage 9: utilization's denominator only needs COUNTS of live
+    // desks/rooms; bookings are scoped by Booking.spaceId, not by ids.
     desk: {
-      findMany: jest.fn().mockResolvedValue(
-        opts.deskIds.map((id) => ({ id })),
-      ),
+      count: jest.fn().mockResolvedValue(opts.deskIds.length),
     },
     room: {
-      findMany: jest.fn().mockResolvedValue(
-        opts.roomIds.map((id) => ({ id })),
-      ),
+      count: jest.fn().mockResolvedValue(opts.roomIds.length),
     },
     booking: {
       count: jest.fn((args: any) => {
@@ -169,5 +167,61 @@ describe('AnalyticsService.spaceSummary', () => {
 
     const result = await service.spaceSummary('space-1');
     expect(result.totalBookingsChangePct).toBeCloseTo(-75);
+  });
+});
+
+// Stage 9.1a: revenue/booking history must not depend on live desk/room rows.
+describe('AnalyticsService.spaceSummary — scoping (Stage 9)', () => {
+  it('scopes every booking query by Booking.spaceId and excludes cancelled bookings', async () => {
+    const prisma = buildPrismaMock({
+      deskIds: ['d1'],
+      roomIds: [],
+      totalBookings: 1,
+      paidAmounts: [1000],
+      activeBookings: 0,
+      currentPeriodCount: 1,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [1000],
+      previousPeriodPaidAmounts: [],
+    });
+    const service = new AnalyticsService(prisma as any);
+
+    await service.spaceSummary('space-1');
+
+    const wheres = [
+      ...prisma.booking.count.mock.calls.map((c: any[]) => c[0].where),
+      ...prisma.booking.findMany.mock.calls.map((c: any[]) => c[0].where),
+    ];
+    expect(wheres.length).toBeGreaterThan(0);
+    for (const where of wheres) {
+      expect(where.spaceId).toBe('space-1');
+      expect(where.cancelledAt).toBeNull();
+      // No join through desk/room ids anymore.
+      expect(where.OR).toBeUndefined();
+    }
+  });
+
+  it('counts desks and rooms for utilization by live rows in the space', async () => {
+    const prisma = buildPrismaMock({
+      deskIds: ['d1', 'd2'],
+      roomIds: ['r1'],
+      totalBookings: 0,
+      paidAmounts: [],
+      activeBookings: 0,
+      currentPeriodCount: 0,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [],
+      previousPeriodPaidAmounts: [],
+    });
+    const service = new AnalyticsService(prisma as any);
+
+    await service.spaceSummary('space-9');
+
+    expect(prisma.desk.count).toHaveBeenCalledWith({
+      where: { zone: { spaceId: 'space-9' } },
+    });
+    expect(prisma.room.count).toHaveBeenCalledWith({
+      where: { zone: { spaceId: 'space-9' } },
+    });
   });
 });

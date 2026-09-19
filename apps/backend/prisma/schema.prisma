@@ -25,11 +25,27 @@ enum BookableType {
 // one payment attempt in this MVP's scope (no partial payments, no
 // multiple attempts modeled), so a separate table would be normalization
 // without payoff at this scale. Revisit if that assumption changes.
+//
+// Stage 9: REFUND_PENDING / REFUNDED / REFUND_FAILED track a refund issued
+// because a Space Manager deleted the desk/room/zone/space a booking was
+// for. PAID -> REFUND_PENDING is recorded in the same DB transaction as the
+// (soft) delete; the Stripe refund call happens after commit and moves it to
+// REFUNDED or REFUND_FAILED (retryable). See ARCHITECTURE.md, Stage 9 design.
 enum PaymentStatus {
   UNPAID
   PENDING
   PAID
   FAILED
+  REFUND_PENDING
+  REFUNDED
+  REFUND_FAILED
+}
+
+// Stage 9: why a booking was cancelled. Only deletion-driven cancellations
+// exist in v1 (no member-initiated cancellation).
+enum CancellationReason {
+  RESOURCE_DELETED
+  SPACE_CLOSED
 }
 
 model Space {
@@ -40,8 +56,16 @@ model Space {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  zones Zone[]
-  users User[]
+  // Stage 9: soft delete. A closed space is never hard-deleted -- its
+  // Users (members stay attached), Bookings and payment history must
+  // survive. Closing rewrites `slug` so the name/join code is freed.
+  deletedAt DateTime?
+
+  zones    Zone[]
+  users    User[]
+  bookings Booking[]
+
+  @@index([deletedAt])
 }
 
 model Zone {
@@ -52,10 +76,16 @@ model Zone {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Stage 9: soft delete. Deleting a Zone soft-deletes its Desks and Rooms
+  // in the same transaction with the same timestamp, so a live row never
+  // has a deleted ancestor.
+  deletedAt DateTime?
+
   desks Desk[]
   rooms Room[]
 
   @@index([spaceId])
+  @@index([spaceId, deletedAt])
 }
 
 model Desk {
@@ -66,7 +96,11 @@ model Desk {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Stage 9: soft delete (see Zone.deletedAt).
+  deletedAt DateTime?
+
   @@index([zoneId])
+  @@index([zoneId, deletedAt])
 }
 
 model Room {
@@ -78,7 +112,11 @@ model Room {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Stage 9: soft delete (see Zone.deletedAt).
+  deletedAt DateTime?
+
   @@index([zoneId])
+  @@index([zoneId, deletedAt])
 }
 
 // Polymorphic booking: bookableId is NOT a formal FK.
@@ -89,17 +127,32 @@ model Room {
 //
 // The stronger PostgreSQL EXCLUDE constraint
 // "no_overlapping_bookings" is defined in the
-// 20260820000000_add_booking_constraints migration and prevents
+// 20260821202823_add_booking_overlap_exclusion migration and prevents
 // overlapping time ranges for the same Desk/Room.
+//
+// Stage 9: a Booking is financial history and must not depend on live
+// Desk/Room rows. `spaceId`, `bookableName`, `platformFeeCents` and
+// `paidAt` are snapshots taken when the booking is created / paid, so
+// revenue, history and refunds survive the (soft) deletion of the
+// desk/room/zone -- and analytics can scope by `spaceId` directly instead
+// of joining through live desk/room ids.
 model Booking {
   id           String       @id @default(cuid())
   bookableType BookableType
   bookableId   String
   userId       String
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Restrict (was Cascade): a hard delete of a User must never silently
+  // erase their payment history. Nothing hard-deletes users today; if code
+  // ever tries, the database now refuses instead of wiping bookings.
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
   startTime    DateTime
   endTime      DateTime
   createdAt    DateTime     @default(now())
+
+  spaceId      String
+  space        Space   @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+  // "Desk A1" -- readable label that survives deletion of the desk/room.
+  bookableName String?
 
   // Stage 6: snapshot the Space's flat booking price at booking creation.
   // Keeping the amount on Booking means later Space price changes do not
@@ -118,14 +171,29 @@ model Booking {
   // slot -- same idea as a movie-ticket seat hold expiring.
   holdExpiresAt DateTime?
 
+  // Stage 9 money snapshots. platformFeeCents is the 5% application fee
+  // fixed when the PaymentIntent is created (so changing the fee % later
+  // can't rewrite history); paidAt is when the booking became PAID
+  // (webhook or reconcile), used for revenue time windows.
+  platformFeeCents Int?
+  paidAt           DateTime?
+
+  // Stage 9 cancellation / refund bookkeeping (set by the delete flows).
+  cancelledAt         DateTime?
+  cancellationReason  CancellationReason?
+  stripeRefundId      String?             @unique
+  refundedAmountCents Int?
+
   @@unique([bookableType, bookableId, startTime])
   @@index([bookableType, bookableId])
   @@index([userId])
+  @@index([spaceId, paymentStatus])
+  @@index([paymentStatus, paidAt])
 }
 
 model User {
-  id        String    @id @default(cuid())
-  email     String    @unique
+  id        String   @id @default(cuid())
+  email     String   @unique
   // Nullable rather than required: lets `prisma migrate deploy` apply
   // cleanly against existing seeded rows before `seed.ts` (updated
   // alongside this migration) reseeds them with real bcrypt hashes.
@@ -137,15 +205,18 @@ model User {
   // Nullable: null for PLATFORM_ADMIN (not scoped to any space),
   // always set for SPACE_MANAGER and MEMBER.
   spaceId   String?
-  space     Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  // Restrict (was Cascade): closing a space is a soft delete, and a hard
+  // delete of a Space must never cascade into its members' accounts (or,
+  // through them, their bookings). See ARCHITECTURE.md, Stage 9 design.
+  space     Space?   @relation(fields: [spaceId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Stage 6: only meaningful for SPACE_MANAGER — the Stripe Connect
   // account that receives the 95% split for bookings in their space.
   // Null until they start Connect onboarding (see StripeService's
   // createOrGetConnectAccount).
-  stripeAccountId String?
+  stripeAccountId          String?
   // Separate from stripeAccountId's presence: an account can exist
   // (stripeAccountId set) but still be mid-onboarding and unable to
   // receive transfers. This flips true only once Stripe's

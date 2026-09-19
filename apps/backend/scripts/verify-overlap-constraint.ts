@@ -32,7 +32,7 @@ async function main() {
   const second = { startTime: new Date('2026-09-01T10:00:00Z'), endTime: new Date('2026-09-01T12:00:00Z') }; 
   console.log('\nCreating first booking (9:00-11:00)...');
   const booking1 = await prisma.booking.create({
-    data: { bookableType: 'DESK', bookableId: desk.id, userId: user.id, ...first },
+    data: { bookableType: 'DESK', bookableId: desk.id, userId: user.id, spaceId: space.id, ...first },
   });
   console.log(`✅ Created: ${booking1.id}`);
 
@@ -41,7 +41,7 @@ async function main() {
 
   try {
     const booking2 = await prisma.booking.create({
-      data: { bookableType: 'DESK', bookableId: desk.id, userId: user.id, ...second },
+      data: { bookableType: 'DESK', bookableId: desk.id, userId: user.id, spaceId: space.id, ...second },
     });
     console.log(`❌ PROBLEM: second booking succeeded (${booking2.id}) — the`);
     console.log('   overlap constraint is NOT active. Check that migration');
