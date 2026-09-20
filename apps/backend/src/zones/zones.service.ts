@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
+import { LIVE } from '../common/live';
 
 @Injectable()
 export class ZonesService {
@@ -8,7 +9,7 @@ export class ZonesService {
 
   findAllForSpace(spaceId: string) {
     return this.prisma.zone.findMany({
-      where: { spaceId },
+      where: { spaceId, ...LIVE },
     });
   }
 
@@ -16,12 +17,12 @@ export class ZonesService {
     const zone = await this.prisma.zone.findUnique({
       where: { id },
       include: {
-        desks: true,
-        rooms: true,
+        desks: { where: LIVE },
+        rooms: { where: LIVE },
       },
     });
 
-    if (!zone || zone.spaceId !== spaceId) {
+    if (!zone || zone.deletedAt || zone.spaceId !== spaceId) {
       throw new NotFoundException('Zone not found in this space');
     }
 
@@ -46,7 +47,7 @@ export class ZonesService {
       where: { id },
     });
 
-    if (!zone || zone.spaceId !== spaceId) {
+    if (!zone || zone.deletedAt || zone.spaceId !== spaceId) {
       throw new NotFoundException('Zone not found in this space');
     }
 
@@ -56,8 +57,8 @@ export class ZonesService {
         name: dto.name,
       },
       include: {
-        desks: true,
-        rooms: true,
+        desks: { where: LIVE },
+        rooms: { where: LIVE },
       },
     });
   }

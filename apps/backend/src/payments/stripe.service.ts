@@ -319,6 +319,64 @@ export class StripeService {
   // PaymentIntent (status requires_payment_method, never attempted)
   // from one that reverted to requires_payment_method after a
   // decline — only the latter should be treated as FAILED.
+  // Stage 9: full refund of a booking's payment, used when a Space Manager
+  // deletes a desk/room/zone (or space) that has a paid, upcoming booking.
+  //
+  // The charge is a DESTINATION charge (transfer_data.destination +
+  // application_fee_amount), so a refund needs two extra flags or the money
+  // would come out of the PLATFORM's balance only:
+  //   reverse_transfer: true        -> pull the manager's 95% share back
+  //   refund_application_fee: true  -> give the platform's 5% back too
+  // The customer therefore gets 100% back, funded by the two parties that
+  // received it. (Stripe's own processing fee is not returned.)
+  //
+  // The idempotency key makes this safe to call again after a timeout or a
+  // crash: Stripe returns the SAME refund instead of refunding twice.
+  async refundBookingPayment(
+    paymentIntentId: string,
+    bookingId: string,
+  ): Promise<{ id: string; status: string; amount: number }> {
+    const refund = await this.stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        reverse_transfer: true,
+        refund_application_fee: true,
+        metadata: { bookingId },
+      },
+      { idempotencyKey: `refund-${bookingId}` },
+    );
+
+    return {
+      id: refund.id,
+      status: refund.status ?? 'unknown',
+      amount: refund.amount,
+    };
+  }
+
+  // Stage 9: stop a member from paying for a booking that was just cancelled.
+  // Never throws for "already in a final state" -- it reports the state so
+  // the caller can decide (a PaymentIntent that already SUCCEEDED must be
+  // refunded, not cancelled).
+  async cancelPaymentIntent(
+    paymentIntentId: string,
+  ): Promise<'canceled' | 'succeeded' | 'other'> {
+    try {
+      const intent =
+        await this.stripe.paymentIntents.cancel(paymentIntentId);
+      return intent.status === 'canceled' ? 'canceled' : 'other';
+    } catch (err) {
+      // Cancel fails if the intent already left a cancellable state
+      // (e.g. the member paid a moment ago). Look at where it ended up.
+      const intent =
+        await this.stripe.paymentIntents.retrieve(paymentIntentId);
+
+      if (intent.status === 'canceled') return 'canceled';
+      if (intent.status === 'succeeded') return 'succeeded';
+
+      throw err;
+    }
+  }
+
   async getPaymentIntentStatus(paymentIntentId: string): Promise<{
     status: Stripe.PaymentIntent.Status;
     hasFailedAttempt: boolean;

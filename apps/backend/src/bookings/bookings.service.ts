@@ -43,7 +43,7 @@ export class BookingsService {
         include: { zone: true },
       });
 
-      if (!desk || desk.zone.spaceId !== spaceId) {
+      if (!desk || desk.deletedAt || desk.zone.spaceId !== spaceId) {
         throw new NotFoundException(
           'Desk not found in this space',
         );
@@ -58,7 +58,7 @@ export class BookingsService {
         include: { zone: true },
       });
 
-      if (!room || room.zone.spaceId !== spaceId) {
+      if (!room || room.deletedAt || room.zone.spaceId !== spaceId) {
         throw new NotFoundException(
           'Room not found in this space',
         );
@@ -140,10 +140,17 @@ export class BookingsService {
       id: string;
       paymentStatus: string;
       stripePaymentIntentId: string | null;
+      cancelledAt?: Date | null;
     },
   >(bookings: T[]): Promise<T[]> {
+    // Stage 9: a cancelled booking (its desk/room was deleted) must never be
+    // "healed" back to PAID by a late Stripe status -- the deletion flow owns
+    // that money (refund or PaymentIntent cancel).
     const pending = bookings.filter(
-      (b) => b.paymentStatus === 'PENDING' && b.stripePaymentIntentId,
+      (b) =>
+        b.paymentStatus === 'PENDING' &&
+        b.stripePaymentIntentId &&
+        !b.cancelledAt,
     );
 
     if (pending.length === 0) {
@@ -464,6 +471,12 @@ export class BookingsService {
       booking.bookableId,
       spaceId,
     );
+
+    if (booking.cancelledAt) {
+      throw new BadRequestException(
+        'This booking was cancelled because the space removed it',
+      );
+    }
 
     if (booking.paymentStatus === 'PAID') {
       throw new BadRequestException('This booking is already paid');

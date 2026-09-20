@@ -7,8 +7,11 @@ export class AnalyticsService {
 
  
   async bookingsPerZone(spaceId: string) {
+    // Live zones only (a deleted zone disappears from the chart), but each
+    // zone's desks/rooms are read WITHOUT the live filter so bookings made
+    // on a since-deleted desk still count toward its zone's history.
     const zones = await this.prisma.zone.findMany({
-      where: { spaceId },
+      where: { spaceId, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -25,6 +28,8 @@ export class AnalyticsService {
 
         const count = await this.prisma.booking.count({
           where: {
+            spaceId,
+            cancelledAt: null,
             OR: [
               { bookableType: 'DESK', bookableId: { in: deskIds } },
               { bookableType: 'ROOM', bookableId: { in: roomIds } },

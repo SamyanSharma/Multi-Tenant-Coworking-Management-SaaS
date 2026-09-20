@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRoomDto } from './dto/create-room.dto';
+import { UpdateRoomDto } from './dto/update-room.dto';
+import { LIVE } from '../common/live';
 
 @Injectable()
 export class RoomsService {
@@ -12,7 +14,7 @@ export class RoomsService {
 
   findAllForSpace(spaceId: string) {
     return this.prisma.room.findMany({
-      where: { zone: { spaceId } },
+      where: { ...LIVE, zone: { spaceId } },
     });
   }
 
@@ -21,7 +23,7 @@ export class RoomsService {
       where: { id },
       include: { zone: true },
     });
-    if (!room || room.zone.spaceId !== spaceId) {
+    if (!room || room.deletedAt || room.zone.spaceId !== spaceId) {
       throw new NotFoundException('Room not found in this space');
     }
     return room;
@@ -31,12 +33,22 @@ export class RoomsService {
     const zone = await this.prisma.zone.findUnique({
       where: { id: dto.zoneId },
     });
-    if (!zone || zone.spaceId !== spaceId) {
+    if (!zone || zone.deletedAt || zone.spaceId !== spaceId) {
       throw new ForbiddenException('Zone does not belong to this space');
     }
 
     return this.prisma.room.create({
       data: { name: dto.name, capacity: dto.capacity, zoneId: dto.zoneId },
+    });
+  }
+
+  // Rename / change capacity. Existing bookings keep the name they were
+  // made under (Booking.bookableName is a snapshot).
+  async update(id: string, dto: UpdateRoomDto, spaceId: string) {
+    await this.findOne(id, spaceId);
+    return this.prisma.room.update({
+      where: { id },
+      data: { name: dto.name, capacity: dto.capacity },
     });
   }
 }
