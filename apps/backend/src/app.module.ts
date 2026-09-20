@@ -14,6 +14,7 @@ import { BookingsModule } from './bookings/bookings.module';
 import { EventsModule } from './events/events.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     EventsModule,
     PaymentsModule,
     AnalyticsModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [
