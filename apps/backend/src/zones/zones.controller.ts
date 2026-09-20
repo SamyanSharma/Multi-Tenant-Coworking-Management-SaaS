@@ -16,6 +16,7 @@ import { CreateZoneDto } from './dto/create-zone.dto';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { DeletionService } from '../deletion/deletion.service';
+import { requireSpaceId } from '../common/require-space';
 
 @Controller('zones')
 export class ZonesController {
@@ -28,7 +29,7 @@ export class ZonesController {
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
-    return this.zonesService.findAllForSpace(req.spaceId!);
+    return this.zonesService.findAllForSpace(requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
@@ -38,7 +39,7 @@ export class ZonesController {
     @Param('id') id: string,
     @Req() req: Request,
   ) {
-    return this.zonesService.findOne(id, req.spaceId!);
+    return this.zonesService.findOne(id, requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
@@ -50,7 +51,7 @@ export class ZonesController {
   ) {
     return this.zonesService.create(
       dto,
-      req.spaceId!,
+      requireSpaceId(req),
     );
   }
 
@@ -65,7 +66,7 @@ export class ZonesController {
     return this.zonesService.update(
       id,
       dto,
-      req.spaceId!,
+      requireSpaceId(req),
     );
   }
 
@@ -74,7 +75,7 @@ export class ZonesController {
   @Roles(Role.SPACE_MANAGER)
   @Get(':id/delete-impact')
   deleteImpact(@Param('id') id: string, @Req() req: Request) {
-    return this.deletionService.getImpact('ZONE', id, req.spaceId!);
+    return this.deletionService.getImpact('ZONE', id, requireSpaceId(req));
   }
 
   // Soft-deletes the zone AND everything in it. With upcoming bookings it
@@ -87,7 +88,7 @@ export class ZonesController {
     @Query('confirmRefund') confirmRefund: string | undefined,
     @Req() req: Request,
   ) {
-    return this.deletionService.remove('ZONE', id, req.spaceId!, {
+    return this.deletionService.remove('ZONE', id, requireSpaceId(req), {
       confirmRefund: confirmRefund === 'true',
     });
   }

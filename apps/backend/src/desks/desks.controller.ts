@@ -17,6 +17,7 @@ import { UpdateDeskDto } from './dto/update-desk.dto';
 import { DeletionService } from '../deletion/deletion.service';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
+import { requireSpaceId } from '../common/require-space';
 
 @Controller('desks')
 export class DesksController {
@@ -29,21 +30,21 @@ export class DesksController {
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
-    return this.desksService.findAllForSpace(req.spaceId!);
+    return this.desksService.findAllForSpace(requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get(':id')
   findOne(@Param('id') id: string, @Req() req: Request) {
-    return this.desksService.findOne(id, req.spaceId!);
+    return this.desksService.findOne(id, requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post()
   create(@Body() dto: CreateDeskDto, @Req() req: Request) {
-    return this.desksService.create(dto, req.spaceId!);
+    return this.desksService.create(dto, requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
@@ -54,14 +55,14 @@ export class DesksController {
     @Body() dto: UpdateDeskDto,
     @Req() req: Request,
   ) {
-    return this.desksService.update(id, dto, req.spaceId!);
+    return this.desksService.update(id, dto, requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Get(':id/delete-impact')
   deleteImpact(@Param('id') id: string, @Req() req: Request) {
-    return this.deletionService.getImpact('DESK', id, req.spaceId!);
+    return this.deletionService.getImpact('DESK', id, requireSpaceId(req));
   }
 
   @UseGuards(RbacGuard)
@@ -72,7 +73,7 @@ export class DesksController {
     @Query('confirmRefund') confirmRefund: string | undefined,
     @Req() req: Request,
   ) {
-    return this.deletionService.remove('DESK', id, req.spaceId!, {
+    return this.deletionService.remove('DESK', id, requireSpaceId(req), {
       confirmRefund: confirmRefund === 'true',
     });
   }

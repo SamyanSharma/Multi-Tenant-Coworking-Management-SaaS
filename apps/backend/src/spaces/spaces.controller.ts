@@ -15,6 +15,7 @@ import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
 import { UpdateSpacePriceDto } from './dto/update-space-price.dto';
+import { requireSpaceId } from '../common/require-space';
 
 @Controller('spaces')
 export class SpacesController {
@@ -31,7 +32,7 @@ export class SpacesController {
  
   @Get('me')
   findOwn(@Req() req: Request) {
-    return this.spacesService.findOwnSpace(req.spaceId!);
+    return this.spacesService.findOwnSpace(requireSpaceId(req));
   }
 
 
@@ -62,7 +63,7 @@ export class SpacesController {
     @Req() req: Request,
   ) {
     return this.spacesService.updatePrice(
-      req.spaceId!,
+      requireSpaceId(req),
       dto.priceCents,
     );
   }

@@ -15,6 +15,7 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { getCallerUserId } from '../auth/caller.util';
+import { requireSpaceId } from '../common/require-space';
 
 @Controller('bookings')
 export class BookingsController {
@@ -27,7 +28,7 @@ export class BookingsController {
   @Get()
   findAll(@Req() req: Request) {
     return this.bookingsService.findAllForSpace(
-      req.spaceId!,
+      requireSpaceId(req),
     );
   }
 
@@ -43,7 +44,7 @@ export class BookingsController {
 
     return this.bookingsService.create(
       dto,
-      req.spaceId!,
+      requireSpaceId(req),
       userId,
     );
   }
@@ -62,7 +63,7 @@ export class BookingsController {
 
     return this.bookingsService.retryPayment(
       id,
-      req.spaceId!,
+      requireSpaceId(req),
       userId,
     );
   }
