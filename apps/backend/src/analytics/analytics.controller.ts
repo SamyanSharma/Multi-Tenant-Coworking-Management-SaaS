@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { AnalyticsService } from './analytics.service';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
+import { requireSpaceId } from '../common/require-space';
 
 
 @Controller('analytics')
@@ -13,11 +14,11 @@ export class AnalyticsController {
 
   @Get('bookings-per-zone')
   bookingsPerZone(@Req() req: Request) {
-    return this.analyticsService.bookingsPerZone(req.spaceId!);
+    return this.analyticsService.bookingsPerZone(requireSpaceId(req));
   }
 
   @Get('summary')
   summary(@Req() req: Request) {
-    return this.analyticsService.spaceSummary(req.spaceId!);
+    return this.analyticsService.spaceSummary(requireSpaceId(req));
   }
 }
