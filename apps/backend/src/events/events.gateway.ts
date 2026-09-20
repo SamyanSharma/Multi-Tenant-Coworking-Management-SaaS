@@ -107,4 +107,15 @@ export class EventsGateway
       .to(spaceRoom(spaceId))
       .emit('booking_created', payload);
   }
+
+  // Stage 9: lifecycle events (`resource_deleted`, `booking_cancelled`,
+  // `space_closed`) go to the same per-space room as booking_created, so
+  // every open floor plan in that tenant updates without a refresh.
+  emitToSpace(
+    spaceId: string,
+    event: string,
+    payload: unknown,
+  ): void {
+    this.server.to(spaceRoom(spaceId)).emit(event, payload);
+  }
 }
