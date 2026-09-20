@@ -5,7 +5,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuthStore, Role } from '@/store/authStore';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
-import { useLiveBookingsStore, LiveBooking } from '@/store/liveBookingsStore';
+import {
+  useLiveBookingsStore,
+  LiveBooking,
+  ResourceDeletedEvent,
+} from '@/store/liveBookingsStore';
 
 interface NavItem {
   label: string;
@@ -14,6 +18,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { label: 'Platform Overview', href: '/dashboard/admin', roles: ['PLATFORM_ADMIN'] },
   { label: 'All Spaces', href: '/dashboard/spaces', roles: ['PLATFORM_ADMIN'] },
   { label: 'My Space', href: '/dashboard/spaces', roles: ['SPACE_MANAGER', 'MEMBER'] },
   { label: 'Bookings', href: '/dashboard/bookings', roles: ['MEMBER', 'SPACE_MANAGER'] },
@@ -33,17 +38,18 @@ export default function DashboardLayout({
   const logout = useAuthStore((state) => state.logout);
   const router = useRouter();
   const addBooking = useLiveBookingsStore((state) => state.addBooking);
+  const removeBooking = useLiveBookingsStore((state) => state.removeBooking);
+  const removeByResourceIds = useLiveBookingsStore((state) => state.removeByResourceIds);
+  const noteResourceDeleted = useLiveBookingsStore((state) => state.noteResourceDeleted);
 
   // One socket connection for the whole dashboard session, with the
   // booking_created listener registered here rather than per-component —
   // this keeps liveBookingsStore up to date no matter which page is
   // currently mounted.
   //
-  // NOTE: booking_cancelled is NOT wired up yet — events.gateway.ts
-  // doesn't emit it (only emitBookingCreated exists today). The store's
-  // removeBooking action is ready for when that's added; wiring a
-  // listener for an event the backend never sends would just be dead
-  // code that looks connected but silently never fires.
+  // Stage 9: the backend now also emits booking_cancelled (a booking was
+  // cancelled because its desk/room was deleted) and resource_deleted (a
+  // desk/room/zone was deleted). Both keep every open floor plan honest.
   useEffect(() => {
     // A socket connection requires a real token — connectSocket()
     // itself no-ops if there's no token, spaceId, or role (e.g.
@@ -82,14 +88,28 @@ export default function DashboardLayout({
     socket.on('disconnect', handleDisconnect);
     socket.on('booking_created', handleBookingCreated);
 
+    const handleBookingCancelled = (payload: { id: string }) => {
+      removeBooking(payload.id);
+    };
+
+    const handleResourceDeleted = (payload: ResourceDeletedEvent) => {
+      removeByResourceIds([...payload.deskIds, ...payload.roomIds]);
+      noteResourceDeleted(payload);
+    };
+
+    socket.on('booking_cancelled', handleBookingCancelled);
+    socket.on('resource_deleted', handleResourceDeleted);
+
     return () => {
       socket.off('connect', handleConnect);
       socket.off('connection_error', handleConnectionError);
       socket.off('disconnect', handleDisconnect);
       socket.off('booking_created', handleBookingCreated);
+      socket.off('booking_cancelled', handleBookingCancelled);
+      socket.off('resource_deleted', handleResourceDeleted);
       disconnectSocket();
     };
-  }, [token, role, spaceId, addBooking]);
+  }, [token, role, spaceId, addBooking, removeBooking, removeByResourceIds, noteResourceDeleted]);
 
   const visibleItems = NAV_ITEMS.filter(
     (item) => role && item.roles.includes(role),

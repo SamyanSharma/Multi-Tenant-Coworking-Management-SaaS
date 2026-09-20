@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { getAuthHeaders } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
@@ -22,10 +22,26 @@ interface Space {
   id: string;
   name: string;
   slug: string;
+  deletedAt?: string | null;
+}
+
+// Real per-space numbers (these cards used to show a hard-coded
+// "24 members / 12 desks / 8 rooms" for every space).
+//  - Platform admin: from GET /admin/overview (members, desks, rooms).
+//  - Manager / member: their own space, counted from /zones, /desks, /rooms.
+interface SpaceStats {
+  first: { label: 'Members' | 'Zones'; value: number };
+  desks: number;
+  rooms: number;
 }
 
 export default function SpacesPage() {
   const [spaces, setSpaces] = useState<Space[]>([]);
+  // Only the newest request may write state. Without this, a slow earlier
+  // request (e.g. one made before the role was known) can finish AFTER the
+  // right one and overwrite it with its error.
+  const requestSeq = useRef(0);
+  const [stats, setStats] = useState<Record<string, SpaceStats>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -33,6 +49,8 @@ export default function SpacesPage() {
   const role = useAuthStore((s) => s.role);
 
   const fetchSpaces = async (showLoading = true) => {
+    const seq = ++requestSeq.current;
+    const isCurrent = () => seq === requestSeq.current;
     if (showLoading) setLoading(true);
     else setIsRefreshing(true);
     
@@ -50,17 +68,65 @@ export default function SpacesPage() {
       }
       
       const data = await res.json();
-      setSpaces(Array.isArray(data) ? data : data ? [data] : []);
+      if (!isCurrent()) return;
+      const list: Space[] = Array.isArray(data) ? data : data ? [data] : [];
+      setSpaces(list);
+
+      // Numbers are a nicety: if they fail to load the cards still work.
+      try {
+        const base = process.env.NEXT_PUBLIC_API_URL;
+        const next: Record<string, SpaceStats> = {};
+        if (role === 'PLATFORM_ADMIN') {
+          const r = await fetch(`${base}/admin/overview`, { headers: getAuthHeaders(), cache: 'no-store' });
+          if (r.ok) {
+            const overview: { perSpace: { id: string; members: number; desks: number; rooms: number }[] } = await r.json();
+            for (const row of overview.perSpace) {
+              next[row.id] = { first: { label: 'Members', value: row.members }, desks: row.desks, rooms: row.rooms };
+            }
+          }
+        } else if (list[0]) {
+          const [z, d, rm] = await Promise.all(
+            ['zones', 'desks', 'rooms'].map((p) =>
+              fetch(`${base}/${p}`, { headers: getAuthHeaders(), cache: 'no-store' }),
+            ),
+          );
+          if (z.ok && d.ok && rm.ok) {
+            next[list[0].id] = {
+              first: { label: 'Zones', value: (await z.json()).length },
+              desks: (await d.json()).length,
+              rooms: (await rm.json()).length,
+            };
+          }
+        }
+        if (isCurrent()) setStats(next);
+      } catch {
+        if (isCurrent()) setStats({});
+      }
     } catch (err) {
+      if (!isCurrent()) return;
       setError(err instanceof Error ? err.message : 'Failed to load spaces');
       setSpaces([]);
     } finally {
-      setLoading(false);
-      setIsRefreshing(false);
+      if (isCurrent()) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
+    // The persisted auth store hydrates a moment after first render. Fetching
+    // while `role` is still null used to hit /spaces/me with an admin token
+    // (a 500), so wait until we know who is asking.
+    if (!role) {
+      // Genuinely signed out (no route guard exists yet): say so instead of
+      // spinning forever.
+      const t = setTimeout(() => {
+        setLoading(false);
+        setError('You are not signed in.');
+      }, 1500);
+      return () => clearTimeout(t);
+    }
     fetchSpaces();
   }, [role]);
 
@@ -198,17 +264,17 @@ export default function SpacesPage() {
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div>
                     <Users className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                    <div className="text-xs font-medium text-slate-700">24</div>
-                    <div className="text-[10px] text-slate-400">Members</div>
+                    <div className="text-xs font-medium text-slate-700">{stats[space.id]?.first.value ?? '–'}</div>
+                    <div className="text-[10px] text-slate-400">{stats[space.id]?.first.label ?? 'Members'}</div>
                   </div>
                   <div>
                     <LayoutGrid className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                    <div className="text-xs font-medium text-slate-700">12</div>
+                    <div className="text-xs font-medium text-slate-700">{stats[space.id]?.desks ?? '–'}</div>
                     <div className="text-[10px] text-slate-400">Desks</div>
                   </div>
                   <div>
                     <CalendarDays className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                    <div className="text-xs font-medium text-slate-700">8</div>
+                    <div className="text-xs font-medium text-slate-700">{stats[space.id]?.rooms ?? '–'}</div>
                     <div className="text-[10px] text-slate-400">Rooms</div>
                   </div>
                 </div>
@@ -217,7 +283,7 @@ export default function SpacesPage() {
               <div className="px-6 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-1 text-xs text-slate-500">
                   <MapPin className="w-3 h-3" />
-                  <span>Active</span>
+                  <span>{space.deletedAt ? 'Closed' : 'Active'}</span>
                 </div>
                 <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 
                                opacity-0 group-hover:opacity-100 transition-opacity">

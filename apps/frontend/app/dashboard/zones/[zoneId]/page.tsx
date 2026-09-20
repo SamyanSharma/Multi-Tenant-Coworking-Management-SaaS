@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
@@ -8,6 +8,10 @@ import ZoneForm from './ZoneForm';
 import DeskForm from './DeskForm';
 import RoomForm from './RoomForm';
 import FloorPlan from '@/components/FloorPlan';
+import ConfirmDeleteDialog from '@/components/ConfirmDeleteDialog';
+import RenameDialog, { RenameKind } from '@/components/RenameDialog';
+import { useLiveBookingsStore } from '@/store/liveBookingsStore';
+import { DeletableKind } from '@/lib/deleteFlow';
 import { 
   MapPin, 
   Loader2, 
@@ -23,7 +27,8 @@ import {
   Building2,
   CalendarDays,
   Activity,
-  Info
+  Info,
+  Trash2,
 } from 'lucide-react';
 
 interface Desk {
@@ -57,6 +62,21 @@ export default function ZoneDetailPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'manage'>('overview');
+  // Stage 9: rename / delete of desks, rooms and this zone.
+  const [deleteTarget, setDeleteTarget] = useState<{ kind: DeletableKind; id: string; name: string } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ kind: RenameKind; id: string; name: string; capacity?: number } | null>(null);
+  const lastResourceDeleted = useLiveBookingsStore((s) => s.lastResourceDeleted);
+  const seenDeletion = useRef(lastResourceDeleted);
+  const [closedNotice, setClosedNotice] = useState<string | null>(null);
+  // After the first successful load, later refreshes (after a rename/delete,
+  // or a socket event) must NOT blank the page with the full-screen loader:
+  // that unmounts everything, including an open dialog, so a person deleting
+  // a desk would never see the "Deleted — $25.00 refunded" result.
+  const loadedOnce = useRef(false);
+  // Lets the socket handler tell "someone else deleted this zone" (redirect)
+  // from "I am deleting it right now" (the dialog's Done button navigates).
+  const deleteTargetRef = useRef(deleteTarget);
+  deleteTargetRef.current = deleteTarget;
 
   const fetchZoneData = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -92,6 +112,7 @@ export default function ZoneDetailPage() {
       setZone(zoneData);
       setDesks(allDesks.filter((d) => d.zoneId === zoneId));
       setRooms(allRooms.filter((r) => r.zoneId === zoneId));
+      loadedOnce.current = true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -102,8 +123,25 @@ export default function ZoneDetailPage() {
 
   useEffect(() => {
     if (!zoneId) return;
-    fetchZoneData();
+    fetchZoneData(!loadedOnce.current);
   }, [zoneId, refreshKey]);
+
+  // Real-time: another tab / manager deleted something. (The event that was
+  // already in the store when this page mounted is ignored.)
+  useEffect(() => {
+    const ev = lastResourceDeleted;
+    if (!ev || ev === seenDeletion.current) return;
+    seenDeletion.current = ev;
+
+    if (ev.type === 'ZONE' && ev.id === zoneId) {
+      if (deleteTargetRef.current?.kind === 'zone') return; // my own delete
+      setClosedNotice('This zone was just deleted.');
+      const t = setTimeout(() => router.replace('/dashboard/zones'), 1800);
+      return () => clearTimeout(t);
+    }
+    // A desk/room of this zone (or any) went away: reload the lists.
+    setRefreshKey((k) => k + 1);
+  }, [lastResourceDeleted, zoneId, router]);
 
   if (loading) {
     return (
@@ -151,10 +189,17 @@ export default function ZoneDetailPage() {
   }
 
   const canManage = role === 'SPACE_MANAGER' || role === 'PLATFORM_ADMIN';
+  // Only Space Managers can rename/delete (the API is SPACE_MANAGER-only).
+  const isManager = role === 'SPACE_MANAGER';
   const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
+      {closedNotice && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          {closedNotice} Taking you back to the zone list…
+        </div>
+      )}
       <button
         onClick={() => router.back()}
         className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 
@@ -260,7 +305,14 @@ export default function ZoneDetailPage() {
               </div>
             </div>
           </div>
-          <FloorPlan zoneId={zone.id} desks={desks} rooms={rooms} />
+          <FloorPlan
+            zoneId={zone.id}
+            desks={desks}
+            rooms={rooms}
+            canManage={isManager}
+            onRename={(kind, r) => setRenameTarget({ kind, id: r.id, name: r.name, capacity: r.capacity })}
+            onDelete={(kind, r) => setDeleteTarget({ kind, id: r.id, name: r.name })}
+          />
         </div>
       )}
 
@@ -299,7 +351,58 @@ export default function ZoneDetailPage() {
               onSuccess={() => setRefreshKey((k) => k + 1)}
             />
           </div>
+
+          {isManager && (
+            <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-lg" data-testid="danger-zone">
+              <div className="mb-2 flex items-center gap-3">
+                <div className="rounded-lg bg-red-50 p-2">
+                  <Trash2 className="h-5 w-5 text-red-600" />
+                </div>
+                <h2 className="text-lg font-semibold text-slate-900">Delete this zone</h2>
+              </div>
+              <p className="mb-4 text-sm text-slate-600">
+                Removes the zone together with all of its desks and rooms. Upcoming bookings are cancelled and
+                refunded; past bookings and payment history are kept.
+              </p>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget({ kind: 'zone', id: zone.id, name: zone.name })}
+                className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+              >
+                Delete zone…
+              </button>
+            </div>
+          )}
         </div>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDeleteDialog
+          kind={deleteTarget.kind}
+          id={deleteTarget.id}
+          name={deleteTarget.name}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            const wasZone = deleteTarget.kind === 'zone';
+            setDeleteTarget(null);
+            if (wasZone) router.push('/dashboard/zones');
+            else setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+
+      {renameTarget && (
+        <RenameDialog
+          kind={renameTarget.kind}
+          id={renameTarget.id}
+          initialName={renameTarget.name}
+          initialCapacity={renameTarget.capacity}
+          onClose={() => setRenameTarget(null)}
+          onSaved={() => {
+            setRenameTarget(null);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
       )}
 
       {role === 'PLATFORM_ADMIN' && (

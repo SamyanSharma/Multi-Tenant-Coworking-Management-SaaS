@@ -1,14 +1,20 @@
 export interface BookingLike {
   startTime: string;
   endTime: string;
+  // Stage 9: set when the booking was cancelled because the space removed
+  // its desk/room (the customer is refunded if they had paid).
+  cancelledAt?: string | null;
 }
 
-export type BookingStatus = 'active' | 'upcoming' | 'completed';
+export type BookingStatus = 'active' | 'upcoming' | 'completed' | 'cancelled';
 
 export function getBookingStatus(
   booking: BookingLike,
   now: Date = new Date(),
 ): BookingStatus {
+  // A cancelled booking is neither upcoming nor active, whatever its dates.
+  if (booking.cancelledAt) return 'cancelled';
+
   const start = new Date(booking.startTime);
   const end = new Date(booking.endTime);
 
@@ -31,6 +37,7 @@ const STATUS_GROUP_ORDER: Record<BookingStatus, number> = {
   active: 0,
   upcoming: 1,
   completed: 2,
+  cancelled: 3,
 };
 
 export function sortBookings<T extends BookingLike>(
@@ -53,6 +60,9 @@ export function sortBookings<T extends BookingLike>(
     // Active: start time doesn't matter much among a small set
     // that's already sharing the "happening now" group; soonest-
     // started (longest-running) first is a reasonable tiebreak.
-    return statusA === 'completed' ? startB - startA : startA - startB;
+    // Cancelled: like completed, most recent first.
+    return statusA === 'completed' || statusA === 'cancelled'
+      ? startB - startA
+      : startA - startB;
   });
 }
