@@ -45,6 +45,7 @@ interface RawBooking {
   bookableId: string;
   startTime: string;
   endTime: string;
+  cancelledAt?: string | null;
 }
 
 export default function BookResourcePage() {
@@ -100,7 +101,7 @@ export default function BookResourcePage() {
         // FAILED bookings here would show a slot as free that the
         // backend would still reject.
         const intervals = all
-          .filter((b) => b.bookableId === bookableId)
+          .filter((b) => b.bookableId === bookableId && !b.cancelledAt)
           .map((b) => ({ start: new Date(b.startTime), end: new Date(b.endTime) }));
 
         setOccupied(intervals);

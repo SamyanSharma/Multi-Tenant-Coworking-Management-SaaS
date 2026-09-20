@@ -5,6 +5,8 @@ import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 import { getBookingStatus, sortBookings } from '@/lib/bookingSort';
 import PaymentStep from '@/components/PaymentStep';
+import { retryRefund } from '@/lib/deleteFlow';
+import { formatCents } from '@/lib/money';
 import { 
   CalendarDays, 
   Loader2, 
@@ -30,7 +32,18 @@ interface Booking {
   endTime: string;
   userId: string;
   amountCents: number | null;
-  paymentStatus: 'UNPAID' | 'PENDING' | 'PAID' | 'FAILED';
+  paymentStatus:
+    | 'UNPAID'
+    | 'PENDING'
+    | 'PAID'
+    | 'FAILED'
+    | 'REFUND_PENDING'
+    | 'REFUNDED'
+    | 'REFUND_FAILED';
+  // Stage 9: cancelled because the space deleted the desk/room.
+  cancelledAt?: string | null;
+  refundedAmountCents?: number | null;
+  bookableName?: string | null;
 }
 
 interface ActivePayment {
@@ -40,7 +53,7 @@ interface ActivePayment {
   holdExpiresAt: string | null;
 }
 
-type FilterType = 'all' | 'upcoming' | 'past' | 'desk' | 'room';
+type FilterType = 'all' | 'upcoming' | 'past' | 'desk' | 'room' | 'cancelled';
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -54,6 +67,7 @@ export default function BookingsPage() {
   const [activePayment, setActivePayment] = useState<ActivePayment | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [refundRetryingId, setRefundRetryingId] = useState<string | null>(null);
 
   const fetchBookings = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -115,6 +129,16 @@ export default function BookingsPage() {
     }
   }
 
+  // Space Manager: a refund that failed (or got stuck) after a delete.
+  async function handleRetryRefund(bookingId: string) {
+    setRefundRetryingId(bookingId);
+    setRetryError(null);
+    const r = await retryRefund(bookingId);
+    setRefundRetryingId(null);
+    if (!r.ok) setRetryError(r.message ?? 'Could not refund yet — please try again.');
+    void fetchBookings(false);
+  }
+
   const filterBookings = (bookings: Booking[]) => {
     const now = new Date();
     
@@ -122,10 +146,13 @@ export default function BookingsPage() {
     
     switch (activeFilter) {
       case 'upcoming':
-        filtered = bookings.filter(b => new Date(b.startTime) > now);
+        filtered = bookings.filter(b => !b.cancelledAt && new Date(b.startTime) > now);
         break;
       case 'past':
-        filtered = bookings.filter(b => new Date(b.endTime) < now);
+        filtered = bookings.filter(b => !b.cancelledAt && new Date(b.endTime) < now);
+        break;
+      case 'cancelled':
+        filtered = bookings.filter(b => Boolean(b.cancelledAt));
         break;
       case 'desk':
         filtered = bookings.filter(b => b.bookableType === 'DESK');
@@ -153,6 +180,8 @@ export default function BookingsPage() {
         return 'bg-blue-100 text-blue-700';
       case 'completed':
         return 'bg-slate-100 text-slate-600';
+      case 'cancelled':
+        return 'bg-red-100 text-red-700';
       default:
         return 'bg-slate-100 text-slate-600';
     }
@@ -165,6 +194,8 @@ export default function BookingsPage() {
       case 'upcoming':
         return <Clock className="w-3 h-3" />;
       case 'completed':
+        return <XCircle className="w-3 h-3" />;
+      case 'cancelled':
         return <XCircle className="w-3 h-3" />;
       default:
         return null;
@@ -179,10 +210,22 @@ export default function BookingsPage() {
         return 'bg-amber-100 text-amber-700';
       case 'FAILED':
         return 'bg-red-100 text-red-700';
+      case 'REFUNDED':
+        return 'bg-sky-100 text-sky-700';
+      case 'REFUND_PENDING':
+        return 'bg-violet-100 text-violet-700';
+      case 'REFUND_FAILED':
+        return 'bg-rose-100 text-rose-700';
       default:
         return 'bg-slate-100 text-slate-600';
     }
   };
+
+  const paymentLabel = (status: Booking['paymentStatus']) =>
+    status
+      .split('_')
+      .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+      .join(' ');
 
   const formatBookingDate = (date: Date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -243,6 +286,7 @@ export default function BookingsPage() {
     { label: 'Past', value: 'past' },
     { label: 'Desks', value: 'desk' },
     { label: 'Rooms', value: 'room' },
+    { label: 'Cancelled', value: 'cancelled' },
   ];
 
   return (
@@ -357,14 +401,15 @@ export default function BookingsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className="font-semibold text-slate-900 text-sm">
-                        {booking.bookableType === 'DESK' ? 'Desk' : 'Room'} {booking.bookableId}
+                        {booking.bookableType === 'DESK' ? 'Desk' : 'Room'} ·{' '}
+                        {booking.bookableName ?? booking.bookableId}
                       </h3>
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
                         {statusIcon}
                         {status.charAt(0).toUpperCase() + status.slice(1)}
                       </span>
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${getPaymentStatusStyle(booking.paymentStatus)}`}>
-                        {booking.paymentStatus.charAt(0) + booking.paymentStatus.slice(1).toLowerCase()}
+                        {paymentLabel(booking.paymentStatus)}
                       </span>
                     </div>
                     
@@ -376,10 +421,20 @@ export default function BookingsPage() {
                         {formatBookingDate(new Date(booking.endTime))}
                       </span>
                     </div>
+                    {booking.cancelledAt && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Cancelled — the space removed this {booking.bookableType === 'DESK' ? 'desk' : 'room'}.
+                        {booking.paymentStatus === 'REFUNDED' &&
+                          ` ${formatCents(booking.refundedAmountCents ?? booking.amountCents)} refunded.`}
+                        {booking.paymentStatus === 'REFUND_PENDING' && ' Refund in progress.'}
+                        {booking.paymentStatus === 'REFUND_FAILED' && ' The refund could not be completed yet.'}
+                      </p>
+                    )}
                   </div>
 
                   {role === 'MEMBER' &&
                     booking.userId === userId &&
+                    !booking.cancelledAt &&
                     (booking.paymentStatus === 'FAILED' || booking.paymentStatus === 'UNPAID') && (
                       <button
                         onClick={() => handleRetryPayment(booking.id)}
@@ -394,6 +449,24 @@ export default function BookingsPage() {
                           <CreditCard className="w-3.5 h-3.5" />
                         )}
                         {booking.paymentStatus === 'FAILED' ? 'Retry payment' : 'Pay now'}
+                      </button>
+                    )}
+
+                  {role === 'SPACE_MANAGER' &&
+                    (booking.paymentStatus === 'REFUND_FAILED' || booking.paymentStatus === 'REFUND_PENDING') && (
+                      <button
+                        onClick={() => handleRetryRefund(booking.id)}
+                        disabled={refundRetryingId === booking.id}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600
+                                 text-white text-xs font-medium rounded-lg hover:bg-rose-700
+                                 transition-colors disabled:opacity-60"
+                      >
+                        {refundRetryingId === booking.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        )}
+                        Retry refund
                       </button>
                     )}
                 </div>

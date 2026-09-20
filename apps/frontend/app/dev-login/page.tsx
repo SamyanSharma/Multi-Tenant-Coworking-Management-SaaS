@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import { login } from '@/lib/api';
+import { homeFor } from '@/lib/home';
 import {
   Shield,
   User,
@@ -77,7 +78,7 @@ export default function LoginPage() {
 
       setStatus('success');
       setTimeout(() => {
-        router.push('/dashboard/spaces');
+        router.push(homeFor(result.user.role));
       }, 300);
     } catch (err) {
       setStatus('error');

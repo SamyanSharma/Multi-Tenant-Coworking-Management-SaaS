@@ -95,3 +95,27 @@ describe('sortBookings', () => {
     expect(list).toEqual(original);
   });
 });
+
+describe('cancelled bookings (Stage 9)', () => {
+  it('is cancelled whatever the dates say', () => {
+    const upcoming = { startTime: '2026-09-18T09:00:00.000Z', endTime: '2026-09-18T10:00:00.000Z', cancelledAt: '2026-09-17T08:00:00.000Z' };
+    const active = { startTime: '2026-09-17T11:00:00.000Z', endTime: '2026-09-17T13:00:00.000Z', cancelledAt: '2026-09-17T08:00:00.000Z' };
+    expect(getBookingStatus(upcoming, NOW)).toBe('cancelled');
+    expect(getBookingStatus(active, NOW)).toBe('cancelled');
+  });
+
+  it('a null cancelledAt does not cancel', () => {
+    const b = { startTime: '2026-09-18T09:00:00.000Z', endTime: '2026-09-18T10:00:00.000Z', cancelledAt: null };
+    expect(getBookingStatus(b, NOW)).toBe('upcoming');
+  });
+
+  it('sorts cancelled last, most recent first', () => {
+    const list = [
+      { id: 'c-old', startTime: '2026-09-10T09:00:00.000Z', endTime: '2026-09-10T10:00:00.000Z', cancelledAt: 'x' },
+      { id: 'done', startTime: '2026-09-15T09:00:00.000Z', endTime: '2026-09-15T10:00:00.000Z' },
+      { id: 'c-new', startTime: '2026-09-19T09:00:00.000Z', endTime: '2026-09-19T10:00:00.000Z', cancelledAt: 'x' },
+      { id: 'soon', startTime: '2026-09-18T09:00:00.000Z', endTime: '2026-09-18T10:00:00.000Z' },
+    ];
+    expect(sortBookings(list, NOW).map((b) => b.id)).toEqual(['soon', 'done', 'c-new', 'c-old']);
+  });
+});
