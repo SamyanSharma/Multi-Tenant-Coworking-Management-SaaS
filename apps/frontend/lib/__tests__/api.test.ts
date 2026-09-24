@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { getAuthHeaders, login, signup } from '../api';
+import { getAuthHeaders, login, signup, getPublicSpaces } from '../api';
 import { useAuthStore } from '@/store/authStore';
 
 function mockFetchOnce(status: number, body: unknown) {
@@ -189,5 +189,55 @@ describe('signup', () => {
         spaceSlug: 'does-not-exist',
       }),
     ).rejects.toThrow('No space found with that join code');
+  });
+
+  it('posts a MEMBER payload with spaceId instead of spaceSlug when browsing', async () => {
+    const body = {
+      accessToken: 'token-4',
+      user: {
+        id: 'u4',
+        email: 'carol@example.com',
+        name: 'Carol',
+        role: 'MEMBER',
+        spaceId: 'space-browsed',
+      },
+    };
+    const fetchMock = mockFetchOnce(201, body);
+
+    const result = await signup({
+      role: 'MEMBER',
+      name: 'Carol',
+      email: 'carol@example.com',
+      password: 'password123',
+      spaceId: 'space-browsed',
+    });
+
+    expect(result).toEqual(body);
+    const [, init] = fetchMock.mock.calls[0];
+    const sentBody = JSON.parse(init.body);
+    expect(sentBody.spaceId).toBe('space-browsed');
+    expect(sentBody.spaceSlug).toBeUndefined();
+  });
+});
+
+describe('getPublicSpaces', () => {
+  it('fetches without an Authorization header — this screen runs before login', async () => {
+    const spaces = [
+      { id: 's1', name: 'Acme', priceCents: 2500, members: 4, desks: 3, rooms: 1 },
+    ];
+    const fetchMock = mockFetchOnce(200, spaces);
+
+    const result = await getPublicSpaces();
+
+    expect(result).toEqual(spaces);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/spaces\/public$/);
+    expect(init).toBeUndefined();
+  });
+
+  it('throws with the backend message on a non-2xx response', async () => {
+    mockFetchOnce(500, { message: 'Internal server error' });
+
+    await expect(getPublicSpaces()).rejects.toThrow('Internal server error');
   });
 });
