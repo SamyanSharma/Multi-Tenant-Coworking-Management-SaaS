@@ -142,3 +142,80 @@ export async function getPublicSpaces(): Promise<PublicSpace[]> {
 
   return data as PublicSpace[];
 }
+
+// PLATFORM_ADMIN drill-down into one (possibly not their own) space.
+// These three take the target space's id in the URL path, not from
+// x-space-id/getAuthHeaders() — unlike every other admin-scoped call
+// in this file, so they work regardless of authStore's spaceId (which
+// stays null for ADMIN; see getAuthHeaders' own comment).
+export interface AdminSpaceDetail {
+  id: string;
+  name: string;
+  slug: string;
+  status: 'ACTIVE' | 'CLOSED';
+  priceCents: number | null;
+  createdAt: string;
+  deletedAt: string | null;
+  manager: { id: string; name: string | null; email: string } | null;
+  counts: { members: number; zones: number; desks: number; rooms: number };
+  revenue: {
+    netCents: number;
+    refundedCents: number;
+    pendingRefundCents: number;
+    platformFeeNetCents: number;
+    last30d: { netCents: number; bookings: number };
+  };
+  zones: Array<{ id: string; name: string; desks: number; rooms: number }>;
+}
+
+export interface AdminMember {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: string;
+}
+
+export interface AdminBookingRow {
+  id: string;
+  bookableType: 'DESK' | 'ROOM';
+  bookableName: string | null;
+  userName: string | null;
+  userEmail: string;
+  startTime: string;
+  endTime: string;
+  paymentStatus: string;
+  amountCents: number | null;
+  refundedAmountCents: number | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminSpaceBookingsPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  rows: AdminBookingRow[];
+}
+
+async function adminGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, { headers: getAuthHeaders(), cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Request failed (${res.status})`));
+  }
+  return data as T;
+}
+
+export function getAdminSpaceDetail(spaceId: string) {
+  return adminGet<AdminSpaceDetail>(`/admin/spaces/${spaceId}`);
+}
+
+export function getAdminSpaceMembers(spaceId: string) {
+  return adminGet<AdminMember[]>(`/admin/spaces/${spaceId}/members`);
+}
+
+export function getAdminSpaceBookings(spaceId: string, page = 1, pageSize = 25) {
+  return adminGet<AdminSpaceBookingsPage>(
+    `/admin/spaces/${spaceId}/bookings?page=${page}&pageSize=${pageSize}`,
+  );
+}
