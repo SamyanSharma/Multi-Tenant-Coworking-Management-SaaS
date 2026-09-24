@@ -75,8 +75,10 @@ export async function login(
 
 // Space Manager signup ("List my space") creates a brand-new Space
 // plus its first user. Member signup ("Rent a space") joins an
-// EXISTING space by its slug (shown to Space Managers on their
-// space's dashboard page as "/{slug}") instead of creating one.
+// EXISTING space either by picking it from GET /spaces/public
+// (spaceId) or by typing the join code a manager shared with them
+// (spaceSlug, still shown on the manager's space page as "/{slug}") —
+// the two are alternative ways in, not one replacing the other.
 // Either way POST /auth/signup returns the same shape as login() —
 // the caller is logged straight in.
 export type SignupInput =
@@ -86,6 +88,13 @@ export type SignupInput =
       email: string;
       password: string;
       spaceName: string;
+    }
+  | {
+      role: 'MEMBER';
+      name: string;
+      email: string;
+      password: string;
+      spaceId: string;
     }
   | {
       role: 'MEMBER';
@@ -109,4 +118,27 @@ export async function signup(input: SignupInput): Promise<LoginResult> {
   }
 
   return data as LoginResult;
+}
+
+export interface PublicSpace {
+  id: string;
+  name: string;
+  priceCents: number | null;
+  members: number;
+  desks: number;
+  rooms: number;
+}
+
+// Unauthenticated — powers the "browse spaces" list on the signup
+// page. No Authorization header on purpose: this is the one screen a
+// visitor sees before they have an account at all.
+export async function getPublicSpaces(): Promise<PublicSpace[]> {
+  const res = await fetch(`${API_URL}/spaces/public`);
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Could not load spaces (${res.status})`));
+  }
+
+  return data as PublicSpace[];
 }
