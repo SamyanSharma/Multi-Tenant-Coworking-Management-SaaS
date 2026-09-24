@@ -35,10 +35,19 @@ export class SignupDto {
   @MinLength(2)
   spaceName?: string;
 
-  // Required only when role === MEMBER ("Rent a space") — joins the
-  // existing space with this slug. The slug is shown to Space
-  // Managers on their space's dashboard page.
-  @ValidateIf((dto: SignupDto) => dto.role === SignupRole.MEMBER)
+  // MEMBER ("Rent a space") joins an existing space either by picking it
+  // from GET /spaces/public (spaceId) or by typing the join code a
+  // manager shared with them (spaceSlug, shown on the manager's space
+  // page). Both are optional here — AuthService.signupAsMember rejects
+  // a MEMBER signup that supplies neither, since "required if role is
+  // MEMBER, but only one of two fields" isn't expressible with
+  // @ValidateIf alone (it only sees `dto`, not "did the other field win").
+  @ValidateIf((dto: SignupDto) => dto.spaceId !== undefined)
+  @IsString()
+  @MinLength(1)
+  spaceId?: string;
+
+  @ValidateIf((dto: SignupDto) => dto.spaceSlug !== undefined)
   @IsString()
   @MinLength(1)
   spaceSlug?: string;
