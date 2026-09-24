@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LIVE } from '../common/live';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_PAGE_SIZE = 25;
 
 export interface SpaceRow {
   id: string;
@@ -34,6 +35,55 @@ export interface AdminOverview {
     changePct: number | null;
   };
   perSpace: SpaceRow[];
+}
+
+export interface SpaceDetail {
+  id: string;
+  name: string;
+  slug: string;
+  status: 'ACTIVE' | 'CLOSED';
+  priceCents: number | null;
+  createdAt: Date;
+  deletedAt: Date | null;
+  manager: { id: string; name: string | null; email: string } | null;
+  counts: { members: number; zones: number; desks: number; rooms: number };
+  revenue: {
+    netCents: number;
+    refundedCents: number;
+    pendingRefundCents: number;
+    platformFeeNetCents: number;
+    last30d: { netCents: number; bookings: number };
+  };
+  zones: Array<{ id: string; name: string; desks: number; rooms: number }>;
+}
+
+export interface AdminBookingRow {
+  id: string;
+  bookableType: string;
+  bookableName: string | null;
+  userName: string | null;
+  userEmail: string;
+  startTime: Date;
+  endTime: Date;
+  paymentStatus: string;
+  amountCents: number | null;
+  refundedAmountCents: number | null;
+  paidAt: Date | null;
+  createdAt: Date;
+}
+
+export interface AdminSpaceBookings {
+  page: number;
+  pageSize: number;
+  total: number;
+  rows: AdminBookingRow[];
+}
+
+export interface AdminMemberRow {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: Date;
 }
 
 /**
@@ -221,5 +271,166 @@ export class AdminService {
       },
       perSpace,
     };
+  }
+
+  // Read-only, admin-only detail for one space — the "click into a
+  // space" drill-down. Deliberately NOT built on top of ZonesService /
+  // BookingsService / SpacesService: those are tenant-scoped by
+  // JWT/TenantGuard and, in BookingsService's case, perform writes and
+  // live Stripe calls as a side effect of a GET (see PROGRESS.md
+  // finding A-06) — the last thing an admin browsing spaces should
+  // trigger. This mirrors overview()'s own pattern instead: pure
+  // database aggregates, scoped to one spaceId via `where`.
+  async getSpaceDetail(spaceId: string, now: Date = new Date()): Promise<SpaceDetail> {
+    const space = await this.prisma.space.findUnique({ where: { id: spaceId } });
+    if (!space) {
+      throw new NotFoundException('No space with that id');
+    }
+
+    const d30 = new Date(now.getTime() - 30 * DAY_MS);
+
+    const [manager, memberCount, zones, moneyByStatus, last30] = await Promise.all([
+      this.prisma.user.findFirst({
+        where: { spaceId, role: 'SPACE_MANAGER' },
+        select: { id: true, name: true, email: true },
+      }),
+      this.prisma.user.count({ where: { spaceId, role: 'MEMBER' } }),
+      this.prisma.zone.findMany({
+        where: { spaceId, ...LIVE },
+        select: {
+          id: true,
+          name: true,
+          _count: { select: { desks: { where: LIVE }, rooms: { where: LIVE } } },
+        },
+      }),
+      this.prisma.booking.groupBy({
+        by: ['paymentStatus'],
+        where: {
+          spaceId,
+          paymentStatus: { in: ['PAID', 'REFUNDED', 'REFUND_PENDING', 'REFUND_FAILED'] },
+        },
+        _sum: { amountCents: true, platformFeeCents: true, refundedAmountCents: true },
+      }),
+      this.prisma.booking.aggregate({
+        where: { spaceId, paymentStatus: 'PAID', paidAt: { gte: d30 } },
+        _sum: { amountCents: true },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const sum = (
+      status: string,
+      field: 'amountCents' | 'platformFeeCents' | 'refundedAmountCents',
+    ) => moneyByStatus.find((r) => r.paymentStatus === status)?._sum[field] ?? 0;
+
+    return {
+      id: space.id,
+      name: space.name,
+      slug: space.slug,
+      status: space.deletedAt ? 'CLOSED' : 'ACTIVE',
+      priceCents: space.priceCents,
+      createdAt: space.createdAt,
+      deletedAt: space.deletedAt,
+      manager: manager ?? null,
+      counts: {
+        members: memberCount,
+        zones: zones.length,
+        desks: zones.reduce((acc, z) => acc + z._count.desks, 0),
+        rooms: zones.reduce((acc, z) => acc + z._count.rooms, 0),
+      },
+      revenue: {
+        netCents: sum('PAID', 'amountCents'),
+        refundedCents: sum('REFUNDED', 'refundedAmountCents'),
+        pendingRefundCents: sum('REFUND_PENDING', 'amountCents') + sum('REFUND_FAILED', 'amountCents'),
+        platformFeeNetCents: sum('PAID', 'platformFeeCents'),
+        last30d: { netCents: last30._sum.amountCents ?? 0, bookings: last30._count._all },
+      },
+      zones: zones.map((z) => ({
+        id: z.id,
+        name: z.name,
+        desks: z._count.desks,
+        rooms: z._count.rooms,
+      })),
+    };
+  }
+
+  // Paginated (never the whole table — this is the "transactions" tab,
+  // which A-06 flags as an unbounded read even for a manager's own
+  // space; an admin drill-down is not the place to repeat that).
+  async getSpaceBookings(
+    spaceId: string,
+    page = 1,
+    pageSize = DEFAULT_PAGE_SIZE,
+  ): Promise<AdminSpaceBookings> {
+    const space = await this.prisma.space.findUnique({
+      where: { id: spaceId },
+      select: { id: true },
+    });
+    if (!space) {
+      throw new NotFoundException('No space with that id');
+    }
+
+    const safePage = Math.max(1, page);
+    const safePageSize = Math.min(Math.max(1, pageSize), 100);
+    const skip = (safePage - 1) * safePageSize;
+
+    const [total, rows] = await Promise.all([
+      this.prisma.booking.count({ where: { spaceId } }),
+      this.prisma.booking.findMany({
+        where: { spaceId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: safePageSize,
+        select: {
+          id: true,
+          bookableType: true,
+          bookableName: true,
+          startTime: true,
+          endTime: true,
+          paymentStatus: true,
+          amountCents: true,
+          refundedAmountCents: true,
+          paidAt: true,
+          createdAt: true,
+          user: { select: { name: true, email: true } },
+        },
+      }),
+    ]);
+
+    return {
+      page: safePage,
+      pageSize: safePageSize,
+      total,
+      rows: rows.map((r) => ({
+        id: r.id,
+        bookableType: r.bookableType,
+        bookableName: r.bookableName,
+        userName: r.user.name,
+        userEmail: r.user.email,
+        startTime: r.startTime,
+        endTime: r.endTime,
+        paymentStatus: r.paymentStatus,
+        amountCents: r.amountCents,
+        refundedAmountCents: r.refundedAmountCents,
+        paidAt: r.paidAt,
+        createdAt: r.createdAt,
+      })),
+    };
+  }
+
+  async getSpaceMembers(spaceId: string): Promise<AdminMemberRow[]> {
+    const space = await this.prisma.space.findUnique({
+      where: { id: spaceId },
+      select: { id: true },
+    });
+    if (!space) {
+      throw new NotFoundException('No space with that id');
+    }
+
+    return this.prisma.user.findMany({
+      where: { spaceId, role: 'MEMBER' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, email: true, createdAt: true },
+    });
   }
 }
