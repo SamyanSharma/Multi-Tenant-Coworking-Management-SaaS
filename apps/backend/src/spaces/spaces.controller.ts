@@ -13,6 +13,7 @@ import { SpacesService } from './spaces.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
+import { Public } from '../auth/public.decorator';
 import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
 import { UpdateSpacePriceDto } from './dto/update-space-price.dto';
 import { requireSpaceId } from '../common/require-space';
@@ -29,7 +30,17 @@ export class SpacesController {
     return this.spacesService.findAll();
   }
 
- 
+  // Public directory for the signup page's "browse spaces" flow — must
+  // be registered before the `:id` route below, or Nest would match
+  // "/spaces/public" as `id: 'public'` instead (same ordering reason
+  // "me" is declared ahead of ":id").
+  @Public()
+  @SkipTenantCheck()
+  @Get('public')
+  findPublic() {
+    return this.spacesService.findPublic();
+  }
+
   @Get('me')
   findOwn(@Req() req: Request) {
     return this.spacesService.findOwnSpace(requireSpaceId(req));

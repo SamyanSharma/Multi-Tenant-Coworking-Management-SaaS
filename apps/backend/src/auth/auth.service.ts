@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -9,6 +10,7 @@ import * as bcrypt from 'bcryptjs';
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { slugify, slugifyWithSuffix } from './slugify.util';
+import { LIVE } from '../common/live';
 
 export interface JwtPayload {
   // Standard JWT claim name for "subject" — the user id.
@@ -22,10 +24,13 @@ export interface SignupInput {
   email: string;
   password: string;
   // SPACE_MANAGER: creates a brand-new space (spaceName required).
-  // MEMBER: joins an existing space by its slug (spaceSlug required)
-  // — there's still no self-serve path to PLATFORM_ADMIN.
+  // MEMBER: joins an existing space, either by id (browsed from
+  // GET /spaces/public) or by its slug (typed in as a join code) —
+  // at least one of the two is required. There's still no self-serve
+  // path to PLATFORM_ADMIN.
   role: 'SPACE_MANAGER' | 'MEMBER';
   spaceName?: string;
+  spaceId?: string;
   spaceSlug?: string;
 }
 
@@ -76,12 +81,10 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(input.password, 10);
 
     if (input.role === 'MEMBER') {
-      return this.signupAsMember(
-        input.name,
-        input.email,
-        passwordHash,
-        input.spaceSlug!,
-      );
+      return this.signupAsMember(input.name, input.email, passwordHash, {
+        spaceId: input.spaceId,
+        spaceSlug: input.spaceSlug,
+      });
     }
 
     return this.signupAsSpaceManager(
@@ -154,23 +157,37 @@ export class AuthService {
     );
   }
 
-  // "Rent a space": joins an EXISTING space by its slug — the slug is
-  // shown to Space Managers on their space's dashboard page (as
-  // "/{slug}"), so a prospective Member needs the manager to share it.
-  // There's no public directory of spaces to browse yet.
+  // "Rent a space": joins an EXISTING space, either picked from the
+  // public directory (spaceId — GET /spaces/public) or by typing the
+  // join code a Space Manager shared with them (spaceSlug, still shown
+  // on the manager's space page — the two are equivalent ways in, not
+  // a replacement of one by the other). A closed space (deletedAt set)
+  // is invisible to both paths: its slug is rewritten on close (see
+  // schema.prisma), and findFirst's `LIVE` filter excludes it either way.
   private async signupAsMember(
     name: string,
     email: string,
     passwordHash: string,
-    spaceSlug: string,
+    target: { spaceId?: string; spaceSlug?: string },
   ) {
-    const space = await this.prisma.space.findUnique({
-      where: { slug: spaceSlug },
+    if (!target.spaceId && !target.spaceSlug) {
+      throw new BadRequestException(
+        'Pick a space to join, or enter a join code',
+      );
+    }
+
+    const space = await this.prisma.space.findFirst({
+      where: {
+        ...LIVE,
+        ...(target.spaceId ? { id: target.spaceId } : { slug: target.spaceSlug }),
+      },
     });
 
     if (!space) {
       throw new NotFoundException(
-        'No space found with that join code — double check it with your Space Manager',
+        target.spaceId
+          ? 'That space is no longer available — pick another from the list'
+          : 'No space found with that join code — double check it with your Space Manager',
       );
     }
 
