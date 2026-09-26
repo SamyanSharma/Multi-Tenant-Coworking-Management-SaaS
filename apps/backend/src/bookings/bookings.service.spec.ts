@@ -28,6 +28,10 @@ function buildDeps() {
         stripeAccountId: 'acct_123',
         stripeOnboardingComplete: true,
       }),
+      // Used by findAllForSpace's post-fetch enrichment (attachDisplayFields)
+      // to attach who booked each row — irrelevant to the payment-flow
+      // fixtures above, which don't set userId, so an empty result is fine.
+      findMany: jest.fn().mockResolvedValue([]),
     },
     booking: {
       findUnique: jest.fn(),
@@ -667,5 +671,73 @@ describe('BookingsService — Stage 9 snapshots', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].bookableName).toBe('Desk A1');
+  });
+
+  it('scopes to one userId when a caller id is passed (a Member must never see another Member\'s bookings)', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1', 'user-me');
+
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+      where: { spaceId: 'space-1', userId: 'user-me' },
+      orderBy: { startTime: 'asc' },
+    });
+  });
+
+  it('omits the userId filter entirely (not userId: undefined) when no caller id is passed — a Space Manager sees the whole space', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1');
+
+    const whereArg = prisma.booking.findMany.mock.calls[0][0].where;
+    expect(whereArg).toEqual({ spaceId: 'space-1' });
+    expect('userId' in whereArg).toBe(false);
+  });
+
+  it('attaches userName/userEmail and zoneName by looking up the booker and the desk/room\'s zone', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        userId: 'user-1',
+        bookableType: 'DESK',
+        bookableId: 'desk-1',
+        paymentStatus: 'PAID',
+      },
+      {
+        id: 'b2',
+        userId: 'user-2',
+        bookableType: 'ROOM',
+        bookableId: 'room-1',
+        paymentStatus: 'PAID',
+      },
+    ]);
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-1', name: 'Alice', email: 'alice@acme.test' },
+      { id: 'user-2', name: null, email: 'bob@acme.test' },
+    ]);
+    prisma.desk.findMany.mockResolvedValue([
+      { id: 'desk-1', zone: { name: 'Main Floor' } },
+    ]);
+    prisma.room.findMany.mockResolvedValue([
+      { id: 'room-1', zone: { name: 'Annex' } },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0]).toMatchObject({ userName: 'Alice', userEmail: 'alice@acme.test', zoneName: 'Main Floor' });
+    expect(result[1]).toMatchObject({ userName: null, userEmail: 'bob@acme.test', zoneName: 'Annex' });
+  });
+
+  it('does not query user/desk/room at all for an empty booking list', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toEqual([]);
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
   });
 });

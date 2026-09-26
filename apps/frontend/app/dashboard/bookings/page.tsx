@@ -44,6 +44,13 @@ interface Booking {
   cancelledAt?: string | null;
   refundedAmountCents?: number | null;
   bookableName?: string | null;
+  // Who booked it and which zone it's in — a Space Manager sees every
+  // booking in their space, so both matter for telling rows apart. A
+  // Member only ever gets their own bookings back (see the backend
+  // scoping fix), so userName here is always just themselves.
+  userName?: string | null;
+  userEmail?: string | null;
+  zoneName?: string | null;
 }
 
 interface ActivePayment {
@@ -402,6 +409,7 @@ export default function BookingsPage() {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className="font-semibold text-slate-900 text-sm">
                         {booking.bookableType === 'DESK' ? 'Desk' : 'Room'} ·{' '}
+                        {booking.zoneName ? `${booking.zoneName} - ` : ''}
                         {booking.bookableName ?? booking.bookableId}
                       </h3>
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
@@ -412,6 +420,13 @@ export default function BookingsPage() {
                         {paymentLabel(booking.paymentStatus)}
                       </span>
                     </div>
+
+                    {role === 'SPACE_MANAGER' && (
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+                        <User className="w-3 h-3" />
+                        <span>{booking.userName ?? booking.userEmail ?? 'Unknown member'}</span>
+                      </div>
+                    )}
                     
                     <div className="flex items-center gap-2 text-sm text-slate-500">
                       <Clock className="w-3.5 h-3.5" />

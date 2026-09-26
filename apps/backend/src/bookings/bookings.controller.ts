@@ -27,8 +27,16 @@ export class BookingsController {
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
+    // A Member must only ever see their own bookings — never another
+    // Member's. A Space Manager needs the whole space's activity, so
+    // gets no userId scope. (req.user is guaranteed set here: this
+    // route sits behind JwtAuthGuard, which runs before RbacGuard.)
+    const scopeToUserId =
+      req.user!.role === Role.MEMBER ? getCallerUserId(req) : undefined;
+
     return this.bookingsService.findAllForSpace(
       requireSpaceId(req),
+      scopeToUserId,
     );
   }
 
