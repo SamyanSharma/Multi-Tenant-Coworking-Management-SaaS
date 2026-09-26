@@ -181,7 +181,11 @@ export default function SpacesPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Spaces</h1>
             <p className="text-sm text-slate-500">
-              {role === 'PLATFORM_ADMIN' ? 'All available spaces' : 'Your managed spaces'}
+              {role === 'PLATFORM_ADMIN'
+                ? 'All available spaces'
+                : role === 'SPACE_MANAGER'
+                  ? 'Your managed space'
+                  : 'The space you joined'}
             </p>
           </div>
         </div>

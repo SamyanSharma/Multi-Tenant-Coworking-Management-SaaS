@@ -73,13 +73,23 @@ export class BookingsService {
   }
 
 
-  async findAllForSpace(spaceId: string) {
+  async findAllForSpace(spaceId: string, scopeToUserId?: string) {
     // Stage 9: scoped by the Booking's own spaceId snapshot instead of
     // joining through live Desk/Room ids. That join would silently drop a
     // booking's history the moment its desk/room is (soft-)deleted; the
     // snapshot column keeps every booking visible to its space regardless.
+    //
+    // scopeToUserId: a MEMBER must only ever see their own bookings —
+    // this was previously missing entirely, so any Member could see
+    // every other Member's booking history for the space (their desk,
+    // their times, their payment status). The controller passes the
+    // caller's own id here for MEMBER and leaves it undefined for
+    // SPACE_MANAGER, who legitimately needs the whole space's activity.
     const bookings = await this.prisma.booking.findMany({
-      where: { spaceId },
+      where: {
+        spaceId,
+        ...(scopeToUserId ? { userId: scopeToUserId } : {}),
+      },
       // Baseline chronological order — no explicit orderBy previously,
       // meaning the API returned whatever order Postgres happened to
       // give back (effectively arbitrary, not something to rely on).
@@ -90,8 +100,82 @@ export class BookingsService {
     });
 
     const active = await this.expireStaleHolds(bookings);
+    const reconciled = await this.reconcilePendingPayments(active);
 
-    return this.reconcilePendingPayments(active);
+    return this.attachDisplayFields(reconciled);
+  }
+
+  // Attaches who booked it (userName/userEmail) and which zone the
+  // desk/room lives in (zoneName) — a Space Manager needs both to make
+  // sense of their space's activity, which the raw Booking row can't
+  // show on its own. Looked up live via userId/bookableId rather than
+  // snapshotted at booking time: unlike bookableName (which must
+  // survive the desk/room itself being deleted, so the booking stays
+  // legible), User/Desk/Room rows are never hard-deleted (see the
+  // schema's own comments to that effect), so this join is always
+  // safe — even after a soft delete, the row and its zone are still
+  // there to look up.
+  private async attachDisplayFields<
+    T extends {
+      userId: string;
+      bookableType: BookableType;
+      bookableId: string;
+    },
+  >(bookings: T[]) {
+    if (bookings.length === 0) {
+      return [] as (T & {
+        userName: string | null;
+        userEmail: string | null;
+        zoneName: string | null;
+      })[];
+    }
+
+    const userIds = [...new Set(bookings.map((b) => b.userId))];
+    const deskIds = [
+      ...new Set(
+        bookings
+          .filter((b) => b.bookableType === BookableType.DESK)
+          .map((b) => b.bookableId),
+      ),
+    ];
+    const roomIds = [
+      ...new Set(
+        bookings
+          .filter((b) => b.bookableType === BookableType.ROOM)
+          .map((b) => b.bookableId),
+      ),
+    ];
+
+    const [users, desks, rooms] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true, email: true },
+      }),
+      deskIds.length
+        ? this.prisma.desk.findMany({
+            where: { id: { in: deskIds } },
+            select: { id: true, zone: { select: { name: true } } },
+          })
+        : Promise.resolve([]),
+      roomIds.length
+        ? this.prisma.room.findMany({
+            where: { id: { in: roomIds } },
+            select: { id: true, zone: { select: { name: true } } },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const zoneNameByBookableId = new Map<string, string>();
+    for (const d of desks) zoneNameByBookableId.set(d.id, d.zone.name);
+    for (const r of rooms) zoneNameByBookableId.set(r.id, r.zone.name);
+
+    return bookings.map((b) => ({
+      ...b,
+      userName: userById.get(b.userId)?.name ?? null,
+      userEmail: userById.get(b.userId)?.email ?? null,
+      zoneName: zoneNameByBookableId.get(b.bookableId) ?? null,
+    }));
   }
 
   // A held slot (PENDING or FAILED with holdExpiresAt in the past) is
