@@ -17,13 +17,24 @@ interface NavItem {
   roles: Role[];
 }
 
+// "My Space" and "Spaces" are the same route (a manager has exactly
+// one space; a member is looking at the one they joined) — only the
+// label differs, since "My Space" reads oddly for someone who doesn't
+// manage it. There's no separate "Manage Zones" link for either role:
+// zones already live inside this page (as cards you click into), and
+// a standalone duplicate list only invited confusion about where
+// zone management actually happens. Billing is SPACE_MANAGER-only —
+// it's Stripe Connect onboarding, which a Member has no use for (a
+// Member's payment status per booking already lives on the Bookings
+// page, so a "Billing" page for them was pure filler; see billing
+// page.tsx for the fallback if someone still lands there by URL).
 const NAV_ITEMS: NavItem[] = [
   { label: 'Platform Overview', href: '/dashboard/admin', roles: ['PLATFORM_ADMIN'] },
   { label: 'All Spaces', href: '/dashboard/spaces', roles: ['PLATFORM_ADMIN'] },
-  { label: 'My Space', href: '/dashboard/spaces', roles: ['SPACE_MANAGER', 'MEMBER'] },
+  { label: 'My Space', href: '/dashboard/spaces', roles: ['SPACE_MANAGER'] },
+  { label: 'Spaces', href: '/dashboard/spaces', roles: ['MEMBER'] },
   { label: 'Bookings', href: '/dashboard/bookings', roles: ['MEMBER', 'SPACE_MANAGER'] },
-  { label: 'Manage Zones', href: '/dashboard/zones', roles: ['SPACE_MANAGER', 'MEMBER'] },
-  { label: 'Billing', href: '/dashboard/settings/billing', roles: ['SPACE_MANAGER', 'MEMBER'] },
+  { label: 'Billing', href: '/dashboard/settings/billing', roles: ['SPACE_MANAGER'] },
   { label: 'Analytics', href: '/dashboard/analytics', roles: ['SPACE_MANAGER'] },
 ];
 
