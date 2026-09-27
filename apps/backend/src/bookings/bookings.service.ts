@@ -72,6 +72,57 @@ export class BookingsService {
     );
   }
 
+  // Dynamic pricing: charges duration × the desk/room's own rate,
+  // rather than always the flat per-space price (the original design,
+  // which also had a sharp edge — a manager could easily forget to set
+  // Space.priceCents at all, and every booking attempt would then fail
+  // with "not configured", which is exactly what was reported).
+  //
+  // Rounding: duration is rounded to the nearest whole minute first
+  // (booking times only ever carry minute precision in practice; this
+  // just guards against float drift in the ms subtraction below), then
+  // any partial hour/day is rounded UP — a 61-minute booking on an
+  // hourly rate is billed as 2 hours, never 1. Every duration is
+  // billed for at least 1 unit, even if it's a few minutes.
+  private calculateAmountCents(
+    bookable: { hourlyRateCents: number | null; dailyRateCents: number | null },
+    startTime: Date,
+    endTime: Date,
+    fallbackFlatPriceCents: number | null,
+  ): number {
+    const { hourlyRateCents, dailyRateCents } = bookable;
+
+    if (hourlyRateCents == null && dailyRateCents == null) {
+      if (fallbackFlatPriceCents == null) {
+        throw new BadRequestException(
+          'Booking price has not been configured for this desk/room',
+        );
+      }
+      return fallbackFlatPriceCents;
+    }
+
+    const durationMinutes = Math.round(
+      (endTime.getTime() - startTime.getTime()) / (60 * 1000),
+    );
+    const durationHours = durationMinutes / 60;
+    const durationDays = durationHours / 24;
+
+    // Both rates set: bill by the day once the stay reaches 24h,
+    // otherwise by the hour. A manager who wants only one billing
+    // unit simply leaves the other rate unset, which skips this branch.
+    if (hourlyRateCents != null && dailyRateCents != null) {
+      return durationHours >= 24
+        ? dailyRateCents * Math.max(1, Math.ceil(durationDays))
+        : hourlyRateCents * Math.max(1, Math.ceil(durationHours));
+    }
+
+    if (dailyRateCents != null) {
+      return dailyRateCents * Math.max(1, Math.ceil(durationDays));
+    }
+
+    return hourlyRateCents! * Math.max(1, Math.ceil(durationHours));
+  }
+
 
   async findAllForSpace(spaceId: string, scopeToUserId?: string) {
     // Stage 9: scoped by the Booking's own spaceId snapshot instead of
@@ -361,16 +412,19 @@ export class BookingsService {
         },
       });
 
-
-    if (
-      !space ||
-      space.priceCents === null
-    ) {
-      throw new BadRequestException(
-        'Booking price has not been configured for this space',
-      );
-    }
-
+    // Dynamic pricing: an hourly/daily rate on the desk/room itself
+    // (set when the manager created it) takes priority; space.priceCents
+    // is only a fallback for a desk/room that predates this feature and
+    // hasn't been given its own rate yet. Throws the same "not configured"
+    // message as before if NEITHER exists anywhere — but now that error
+    // should be rare, since DesksService/RoomsService.create() requires
+    // a rate on every new desk/room going forward.
+    const amountCents = this.calculateAmountCents(
+      bookable,
+      new Date(startTime),
+      new Date(endTime),
+      space?.priceCents ?? null,
+    );
 
 
     const spaceManager =
@@ -421,8 +475,7 @@ export class BookingsService {
                 userId,
                 startTime,
                 endTime,
-                amountCents:
-                  space.priceCents,
+                amountCents,
                 // Stage 9 snapshots: financial history must not depend on
                 // the live Desk/Room row (which may later be soft-deleted).
                 spaceId,
@@ -448,7 +501,7 @@ export class BookingsService {
         try {
           const result = await this.createAndAttachPaymentIntent(
             booking.id,
-            space.priceCents,
+            amountCents,
             spaceManager.stripeAccountId,
           );
 

@@ -96,6 +96,18 @@ model Desk {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Per-resource pricing, added alongside dynamic booking pricing.
+  // At least one of the two is required going forward (enforced in
+  // DesksService.create, not here — class-validator can't express
+  // "at least one of these two fields" any more cleanly than the
+  // existing spaceId/spaceSlug "at least one" check in auth does).
+  // A booking's amountCents is computed from whichever rate fits its
+  // duration (see BookingsService.calculateAmountCents); Space.priceCents
+  // remains only as a fallback for a desk/room created before this
+  // migration that hasn't been given its own rate yet.
+  hourlyRateCents Int?
+  dailyRateCents  Int?
+
   // Stage 9: soft delete (see Zone.deletedAt).
   deletedAt DateTime?
 
@@ -111,6 +123,10 @@ model Room {
   zone      Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // See Desk.hourlyRateCents / dailyRateCents above — same rules.
+  hourlyRateCents Int?
+  dailyRateCents  Int?
 
   // Stage 9: soft delete (see Zone.deletedAt).
   deletedAt DateTime?
