@@ -21,6 +21,8 @@ import {
 interface RoomFormProps {
   initialName?: string;
   initialCapacity?: number;
+  initialHourlyRateCents?: number | null;
+  initialDailyRateCents?: number | null;
   roomId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
@@ -29,6 +31,8 @@ interface RoomFormProps {
 export default function RoomForm({
   initialName = '',
   initialCapacity = 1,
+  initialHourlyRateCents = null,
+  initialDailyRateCents = null,
   roomId,
   onSuccess,
   onCancel,
@@ -37,6 +41,12 @@ export default function RoomForm({
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [capacity, setCapacity] = useState(initialCapacity);
+  const [hourlyRate, setHourlyRate] = useState(
+    initialHourlyRateCents != null ? (initialHourlyRateCents / 100).toString() : '',
+  );
+  const [dailyRate, setDailyRate] = useState(
+    initialDailyRateCents != null ? (initialDailyRateCents / 100).toString() : '',
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -74,6 +84,15 @@ export default function RoomForm({
     return true;
   };
 
+  // See DeskForm's identical helper.
+  function parseRateCents(value: string): number | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return Math.round(num * 100);
+  }
+
   const adjustCapacity = (delta: number) => {
     const newCapacity = capacity + delta;
     if (newCapacity >= 1 && newCapacity <= 500) {
@@ -93,6 +112,15 @@ export default function RoomForm({
       return;
     }
 
+    const hourlyRateCents = parseRateCents(hourlyRate);
+    const dailyRateCents = parseRateCents(dailyRate);
+
+    if (!isEditing && hourlyRateCents == null && dailyRateCents == null) {
+      setValidationError('Set an hourly rate, a daily rate, or both');
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const base = process.env.NEXT_PUBLIC_API_URL;
       const res = await fetch(
@@ -103,10 +131,12 @@ export default function RoomForm({
             'Content-Type': 'application/json',
             ...getAuthHeaders(),
           },
-          body: JSON.stringify({ 
-            name: name.trim(), 
-            capacity, 
-            zoneId 
+          body: JSON.stringify({
+            name: name.trim(),
+            capacity,
+            zoneId,
+            ...(hourlyRateCents != null ? { hourlyRateCents } : {}),
+            ...(dailyRateCents != null ? { dailyRateCents } : {}),
           }),
         }
       );
@@ -245,6 +275,45 @@ export default function RoomForm({
               {capacity} {capacity === 1 ? 'person' : 'people'}
             </span>
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+              Hourly Rate ($)
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={hourlyRate}
+              onChange={(e) => setHourlyRate(e.target.value)}
+              placeholder="e.g. 20.00"
+              className="w-full border-2 border-slate-200 rounded-lg px-4 py-2.5 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                       placeholder:text-slate-400 transition-all"
+            />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+              Daily Rate ($)
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={dailyRate}
+              onChange={(e) => setDailyRate(e.target.value)}
+              placeholder="e.g. 120.00"
+              className="w-full border-2 border-slate-200 rounded-lg px-4 py-2.5 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                       placeholder:text-slate-400 transition-all"
+            />
+          </div>
+          <p className="col-span-2 text-xs text-slate-400 -mt-2">
+            Set at least one. A booking is charged by the hour if it's under a
+            day, otherwise by the day (when both are set).
+          </p>
         </div>
 
         {validationError && (
