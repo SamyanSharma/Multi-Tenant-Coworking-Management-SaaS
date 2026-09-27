@@ -741,3 +741,146 @@ describe('BookingsService — Stage 9 snapshots', () => {
     expect(prisma.user.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe('BookingsService.create — dynamic per-resource pricing', () => {
+  const dto = (startTime: string, endTime: string) => ({
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime,
+    endTime,
+  });
+
+  const HOUR = 60 * 60 * 1000;
+  const now = () => Date.now();
+
+  it('charges hourlyRateCents × ceil(hours) — a 90-minute booking bills 2 full hours', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1',
+      name: 'Desk A1',
+      zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500,
+      dailyRateCents: null,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 90 * 60 * 1000).toISOString();
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 1000 }), // 500 * ceil(1.5) = 1000
+    });
+  });
+
+  it('never bills less than 1 hour, even for a 10-minute booking', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500, dailyRateCents: null,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 500 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 10 * 60 * 1000).toISOString();
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 500 }),
+    });
+  });
+
+  it('charges dailyRateCents × ceil(days) when only a daily rate is set', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: null, dailyRateCents: 4000,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 8000 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 30 * 60 * 60 * 1000).toISOString(); // 30h -> 2 days
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 8000 }), // 4000 * ceil(30/24) = 8000
+    });
+  });
+
+  it('with both rates set, uses the daily rate once the stay reaches 24h and the hourly rate below that', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500, dailyRateCents: 4000,
+    });
+    prisma.booking.create
+      .mockResolvedValueOnce({ id: 'b1', amountCents: 2000 })
+      .mockResolvedValueOnce({ id: 'b2', amountCents: 4000 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    // 3 hours -> hourly path: 500 * 3 = 1500... wait must be ceil(3)=3 -> 1500
+    const shortStart = new Date(now() + HOUR).toISOString();
+    const shortEnd = new Date(now() + HOUR + 3 * HOUR).toISOString();
+    await service.create(dto(shortStart, shortEnd), 'space-1', 'user-1');
+    expect(prisma.booking.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({ amountCents: 1500 }),
+    });
+
+    // 25 hours -> daily path: 4000 * ceil(25/24) = 4000 * 2 = 8000
+    const longStart = new Date(now() + HOUR).toISOString();
+    const longEnd = new Date(now() + HOUR + 25 * HOUR).toISOString();
+    await service.create(dto(longStart, longEnd), 'space-1', 'user-1');
+    expect(prisma.booking.create).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({ amountCents: 8000 }),
+    });
+  });
+
+  it('falls back to Space.priceCents (flat) when the desk has no rate of its own — pre-migration desks stay bookable', async () => {
+    const { service, prisma } = buildDeps();
+    // buildDeps' default desk mock has no hourlyRateCents/dailyRateCents,
+    // and its default space mock has priceCents: 1000.
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    await service.create(dto(FUTURE_START, FUTURE_END), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 1000 }),
+    });
+  });
+
+  it('rejects with a clear message when neither the desk nor the space has any price configured', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: null, dailyRateCents: null,
+    });
+    prisma.space.findUnique.mockResolvedValue({ priceCents: null });
+
+    await expect(
+      service.create(dto(FUTURE_START, FUTURE_END), 'space-1', 'user-1'),
+    ).rejects.toThrow('Booking price has not been configured for this desk/room');
+    expect(prisma.booking.create).not.toHaveBeenCalled();
+  });
+
+  it('passes the same computed amountCents to the Stripe PaymentIntent as was stored on the booking — never a stale flat price', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 700, dailyRateCents: null,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 1400 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 2 * HOUR).toISOString(); // exactly 2h
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(stripeService.createBookingPaymentIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ amountCents: 1400 }), // 700 * 2, not the flat space price (1000)
+    );
+  });
+});

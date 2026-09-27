@@ -18,4 +18,15 @@ export class UpdateRoomDto {
   @IsInt()
   @Min(1)
   capacity?: number;
+
+  // See UpdateDeskDto's comment — same "omit means unchanged" rule.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  hourlyRateCents?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  dailyRateCents?: number;
 }

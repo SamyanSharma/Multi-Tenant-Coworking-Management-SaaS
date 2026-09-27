@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsInt, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsInt, IsOptional, Min } from 'class-validator';
 
 export class CreateRoomDto {
   @IsString()
@@ -12,4 +12,16 @@ export class CreateRoomDto {
   @IsString()
   @IsNotEmpty()
   zoneId: string;
+
+  // At least one of these two is required — enforced in
+  // RoomsService.create (see CreateDeskDto's comment; same reasoning).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  hourlyRateCents?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  dailyRateCents?: number;
 }
