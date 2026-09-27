@@ -35,20 +35,10 @@ export class SignupDto {
   @MinLength(2)
   spaceName?: string;
 
-  // MEMBER ("Rent a space") joins an existing space either by picking it
-  // from GET /spaces/public (spaceId) or by typing the join code a
-  // manager shared with them (spaceSlug, shown on the manager's space
-  // page). Both are optional here — AuthService.signupAsMember rejects
-  // a MEMBER signup that supplies neither, since "required if role is
-  // MEMBER, but only one of two fields" isn't expressible with
-  // @ValidateIf alone (it only sees `dto`, not "did the other field win").
-  @ValidateIf((dto: SignupDto) => dto.spaceId !== undefined)
-  @IsString()
-  @MinLength(1)
-  spaceId?: string;
-
-  @ValidateIf((dto: SignupDto) => dto.spaceSlug !== undefined)
-  @IsString()
-  @MinLength(1)
-  spaceSlug?: string;
+  // MEMBER ("Rent a space") no longer picks a space at signup at all —
+  // deliberately removed. With many spaces on the platform, a dropdown
+  // shown at registration doesn't scale, and there's no need to force
+  // that choice before the account exists. A Member joins a space
+  // afterward from the "browse all spaces" screen, which calls
+  // POST /spaces/:id/join — see SpacesService.join.
 }

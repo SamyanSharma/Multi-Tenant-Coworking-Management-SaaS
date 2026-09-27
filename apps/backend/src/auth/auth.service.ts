@@ -1,8 +1,6 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -10,7 +8,6 @@ import * as bcrypt from 'bcryptjs';
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { slugify, slugifyWithSuffix } from './slugify.util';
-import { LIVE } from '../common/live';
 
 export interface JwtPayload {
   // Standard JWT claim name for "subject" — the user id.
@@ -24,14 +21,16 @@ export interface SignupInput {
   email: string;
   password: string;
   // SPACE_MANAGER: creates a brand-new space (spaceName required).
-  // MEMBER: joins an existing space, either by id (browsed from
-  // GET /spaces/public) or by its slug (typed in as a join code) —
-  // at least one of the two is required. There's still no self-serve
-  // path to PLATFORM_ADMIN.
+  // MEMBER: creates a plain platform account with no space at all —
+  // picking one is a separate step after signup (SpacesService.join,
+  // via POST /spaces/:id/join from the "browse all spaces" screen),
+  // not a dropdown shown during registration. That dropdown used to
+  // be here and got removed on purpose: with many spaces on the
+  // platform, forcing a choice before the account even exists doesn't
+  // scale, and it's not needed for the account to be created. There's
+  // still no self-serve path to PLATFORM_ADMIN.
   role: 'SPACE_MANAGER' | 'MEMBER';
   spaceName?: string;
-  spaceId?: string;
-  spaceSlug?: string;
 }
 
 const MAX_SLUG_ATTEMPTS = 5;
@@ -81,10 +80,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(input.password, 10);
 
     if (input.role === 'MEMBER') {
-      return this.signupAsMember(input.name, input.email, passwordHash, {
-        spaceId: input.spaceId,
-        spaceSlug: input.spaceSlug,
-      });
+      return this.signupAsMember(input.name, input.email, passwordHash);
     }
 
     return this.signupAsSpaceManager(
@@ -157,40 +153,16 @@ export class AuthService {
     );
   }
 
-  // "Rent a space": joins an EXISTING space, either picked from the
-  // public directory (spaceId — GET /spaces/public) or by typing the
-  // join code a Space Manager shared with them (spaceSlug, still shown
-  // on the manager's space page — the two are equivalent ways in, not
-  // a replacement of one by the other). A closed space (deletedAt set)
-  // is invisible to both paths: its slug is rewritten on close (see
-  // schema.prisma), and findFirst's `LIVE` filter excludes it either way.
+  // "Rent a space": creates a plain MEMBER account with no space at
+  // all -- picking one happens afterward, via SpacesService.join
+  // (POST /spaces/:id/join) from a "browse all spaces" screen. This
+  // used to look a space up by id/slug right here at signup; that's
+  // gone on purpose (see SignupInput's comment).
   private async signupAsMember(
     name: string,
     email: string,
     passwordHash: string,
-    target: { spaceId?: string; spaceSlug?: string },
   ) {
-    if (!target.spaceId && !target.spaceSlug) {
-      throw new BadRequestException(
-        'Pick a space to join, or enter a join code',
-      );
-    }
-
-    const space = await this.prisma.space.findFirst({
-      where: {
-        ...LIVE,
-        ...(target.spaceId ? { id: target.spaceId } : { slug: target.spaceSlug }),
-      },
-    });
-
-    if (!space) {
-      throw new NotFoundException(
-        target.spaceId
-          ? 'That space is no longer available — pick another from the list'
-          : 'No space found with that join code — double check it with your Space Manager',
-      );
-    }
-
     try {
       const user = await this.prisma.user.create({
         data: {
@@ -198,7 +170,7 @@ export class AuthService {
           email,
           password: passwordHash,
           role: Role.MEMBER,
-          spaceId: space.id,
+          spaceId: null,
         },
       });
 
@@ -216,7 +188,8 @@ export class AuthService {
     }
   }
 
-  private buildAuthResult(user: {
+  buildAuthResult(user: {
+
     id: string;
     email: string;
     name: string | null;

@@ -74,13 +74,13 @@ export async function login(
 }
 
 // Space Manager signup ("List my space") creates a brand-new Space
-// plus its first user. Member signup ("Rent a space") joins an
-// EXISTING space either by picking it from GET /spaces/public
-// (spaceId) or by typing the join code a manager shared with them
-// (spaceSlug, still shown on the manager's space page as "/{slug}") —
-// the two are alternative ways in, not one replacing the other.
-// Either way POST /auth/signup returns the same shape as login() —
-// the caller is logged straight in.
+// plus its first user. Member signup ("Rent a space") creates a plain
+// account with no space at all — picking one is a separate step after
+// signup (see joinSpace() below), from the "browse all spaces" screen.
+// A long dropdown at signup time doesn't scale once there are many
+// spaces on the platform, so that step was removed entirely rather
+// than reworked. Either way POST /auth/signup returns the same shape
+// as login() — the caller is logged straight in.
 export type SignupInput =
   | {
       role: 'SPACE_MANAGER';
@@ -94,14 +94,6 @@ export type SignupInput =
       name: string;
       email: string;
       password: string;
-      spaceId: string;
-    }
-  | {
-      role: 'MEMBER';
-      name: string;
-      email: string;
-      password: string;
-      spaceSlug: string;
     };
 
 export async function signup(input: SignupInput): Promise<LoginResult> {
@@ -129,9 +121,13 @@ export interface PublicSpace {
   rooms: number;
 }
 
-// Unauthenticated — powers the "browse spaces" list on the signup
-// page. No Authorization header on purpose: this is the one screen a
-// visitor sees before they have an account at all.
+// Powers the "browse all spaces" screen — shown to a signed-in Member
+// with no spaceId yet (there's no other way in now that signup no
+// longer assigns one), and reused for anyone just looking. No
+// Authorization header on purpose: this same list is also shown to a
+// brand-new account before they've picked anything, and the data
+// itself (name/price/rough size, no slug or Stripe/user fields) was
+// never sensitive.
 export async function getPublicSpaces(): Promise<PublicSpace[]> {
   const res = await fetch(`${API_URL}/spaces/public`);
   const data = await res.json().catch(() => null);
@@ -141,6 +137,25 @@ export async function getPublicSpaces(): Promise<PublicSpace[]> {
   }
 
   return data as PublicSpace[];
+}
+
+// A MEMBER with no space yet picks one from getPublicSpaces() and
+// calls this. Returns a fresh LoginResult — the caller's OLD token
+// still carries spaceId: null, so the returned accessToken must
+// replace it (the frontend does this the same way login()/signup()
+// results are stored).
+export async function joinSpace(spaceId: string): Promise<LoginResult> {
+  const res = await fetch(`${API_URL}/spaces/${spaceId}/join`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Could not join space (${res.status})`));
+  }
+
+  return data as LoginResult;
 }
 
 // PLATFORM_ADMIN drill-down into one (possibly not their own) space.

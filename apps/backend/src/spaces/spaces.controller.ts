@@ -17,6 +17,7 @@ import { Public } from '../auth/public.decorator';
 import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
 import { UpdateSpacePriceDto } from './dto/update-space-price.dto';
 import { requireSpaceId } from '../common/require-space';
+import { getCallerUserId } from '../auth/caller.util';
 
 @Controller('spaces')
 export class SpacesController {
@@ -77,5 +78,20 @@ export class SpacesController {
       requireSpaceId(req),
       dto.priceCents,
     );
+  }
+
+  // A MEMBER with no space yet (signup no longer assigns one — see
+  // SignupDto) picks one from GET /spaces/public and calls this.
+  // @SkipTenantCheck(): TenantGuard would otherwise reject this exact
+  // caller with "User has no associated space" before the handler ever
+  // runs, since they don't have one yet — that's the whole point of
+  // this endpoint. Returns a fresh accessToken (the old one's JWT still
+  // carries spaceId: null) — same response shape as login/signup.
+  @UseGuards(RbacGuard)
+  @Roles(Role.MEMBER)
+  @SkipTenantCheck()
+  @Post(':id/join')
+  join(@Param('id') id: string, @Req() req: Request) {
+    return this.spacesService.join(getCallerUserId(req), id);
   }
 }

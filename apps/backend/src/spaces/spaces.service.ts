@@ -1,7 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  ConflictException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
 import { LIVE } from '../common/live';
+import { AuthService } from '../auth/auth.service';
 
 export interface PublicSpace {
   id: string;
@@ -14,7 +20,10 @@ export interface PublicSpace {
 
 @Injectable()
 export class SpacesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+  ) {}
 
   findAll() {
     return this.prisma.space.findMany();
@@ -100,5 +109,44 @@ async updatePrice(spaceId: string, priceCents: number) {
 
   create(dto: CreateSpaceDto) {
     return this.prisma.space.create({ data: dto });
+  }
+
+  // "Browse all spaces" -> Join. Replaces the old signup-time
+  // slug/id lookup: a MEMBER now always signs up with no space, then
+  // calls this once they've picked one from GET /spaces/public. Since
+  // the JWT carries spaceId, joining must reissue a token — that's why
+  // this returns a full auth result (accessToken + user), the same
+  // shape as login/signup, not just the updated user row.
+  async join(userId: string, spaceId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user || user.role !== 'MEMBER') {
+      // Route is @Roles(MEMBER)-gated already; this only fires if the
+      // user row itself is somehow inconsistent with their own JWT.
+      throw new ForbiddenException('Only a Member account can join a space');
+    }
+
+    if (user.spaceId) {
+      throw new ConflictException(
+        'You have already joined a space — there is no switching in this version',
+      );
+    }
+
+    const space = await this.prisma.space.findFirst({
+      where: { id: spaceId, ...LIVE },
+    });
+
+    if (!space) {
+      throw new NotFoundException(
+        'That space is no longer available — pick another from the list',
+      );
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { spaceId: space.id },
+    });
+
+    return this.authService.buildAuthResult(updated);
   }
 }
