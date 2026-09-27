@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { getAuthHeaders, login, signup, getPublicSpaces } from '../api';
+import { getAuthHeaders, login, signup, getPublicSpaces, joinSpace } from '../api';
 import { useAuthStore } from '@/store/authStore';
 
 function mockFetchOnce(status: number, body: unknown) {
@@ -131,7 +131,7 @@ describe('signup', () => {
     });
   });
 
-  it('posts a MEMBER payload with spaceSlug instead of spaceName', async () => {
+  it('posts a plain MEMBER payload with no space fields at all', async () => {
     const body = {
       accessToken: 'token-3',
       user: {
@@ -139,7 +139,7 @@ describe('signup', () => {
         email: 'bob@example.com',
         name: 'Bob',
         role: 'MEMBER',
-        spaceId: 'space-existing',
+        spaceId: null,
       },
     };
     const fetchMock = mockFetchOnce(201, body);
@@ -149,14 +149,19 @@ describe('signup', () => {
       name: 'Bob',
       email: 'bob@example.com',
       password: 'password123',
-      spaceSlug: 'acme-coworking',
     });
 
     expect(result).toEqual(body);
     const [, init] = fetchMock.mock.calls[0];
     const sentBody = JSON.parse(init.body);
-    expect(sentBody.spaceSlug).toBe('acme-coworking');
-    expect(sentBody.spaceName).toBeUndefined();
+    expect(sentBody).toEqual({
+      role: 'MEMBER',
+      name: 'Bob',
+      email: 'bob@example.com',
+      password: 'password123',
+    });
+    expect(sentBody.spaceId).toBeUndefined();
+    expect(sentBody.spaceSlug).toBeUndefined();
   });
 
   it('throws with the backend conflict message when the email is taken', async () => {
@@ -173,50 +178,6 @@ describe('signup', () => {
         spaceName: 'Acme',
       }),
     ).rejects.toThrow('An account with this email already exists');
-  });
-
-  it('throws with the backend not-found message for an unknown space slug', async () => {
-    mockFetchOnce(404, {
-      message: 'No space found with that join code',
-    });
-
-    await expect(
-      signup({
-        role: 'MEMBER',
-        name: 'Bob',
-        email: 'bob@example.com',
-        password: 'password123',
-        spaceSlug: 'does-not-exist',
-      }),
-    ).rejects.toThrow('No space found with that join code');
-  });
-
-  it('posts a MEMBER payload with spaceId instead of spaceSlug when browsing', async () => {
-    const body = {
-      accessToken: 'token-4',
-      user: {
-        id: 'u4',
-        email: 'carol@example.com',
-        name: 'Carol',
-        role: 'MEMBER',
-        spaceId: 'space-browsed',
-      },
-    };
-    const fetchMock = mockFetchOnce(201, body);
-
-    const result = await signup({
-      role: 'MEMBER',
-      name: 'Carol',
-      email: 'carol@example.com',
-      password: 'password123',
-      spaceId: 'space-browsed',
-    });
-
-    expect(result).toEqual(body);
-    const [, init] = fetchMock.mock.calls[0];
-    const sentBody = JSON.parse(init.body);
-    expect(sentBody.spaceId).toBe('space-browsed');
-    expect(sentBody.spaceSlug).toBeUndefined();
   });
 });
 
@@ -239,5 +200,30 @@ describe('getPublicSpaces', () => {
     mockFetchOnce(500, { message: 'Internal server error' });
 
     await expect(getPublicSpaces()).rejects.toThrow('Internal server error');
+  });
+});
+
+describe('joinSpace', () => {
+  it('POSTs to /spaces/:id/join with the Authorization header and returns a fresh LoginResult', async () => {
+    useAuthStore.setState({ token: 'old-token', role: 'MEMBER', spaceId: null });
+    const body = {
+      accessToken: 'fresh-token',
+      user: { id: 'u1', email: 'a@b.com', name: 'A', role: 'MEMBER', spaceId: 's1' },
+    };
+    const fetchMock = mockFetchOnce(201, body);
+
+    const result = await joinSpace('s1');
+
+    expect(result).toEqual(body);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toMatch(/\/spaces\/s1\/join$/);
+    expect(init.method).toBe('POST');
+    expect(init.headers['Authorization']).toBe('Bearer old-token');
+  });
+
+  it('throws with the backend message on a non-2xx response (e.g. already joined a space)', async () => {
+    mockFetchOnce(409, { message: 'You have already joined a space' });
+
+    await expect(joinSpace('s1')).rejects.toThrow('You have already joined a space');
   });
 });

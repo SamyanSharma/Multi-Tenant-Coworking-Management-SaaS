@@ -1,7 +1,5 @@
 import {
-  BadRequestException,
   ConflictException,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -271,7 +269,6 @@ describe('AuthService', () => {
       email: 'bob@example.com',
       password: 'a-real-password',
       role: 'MEMBER' as const,
-      spaceSlug: 'acme-coworking',
     };
 
     it('rejects signup when the email is already registered', async () => {
@@ -281,62 +278,30 @@ describe('AuthService', () => {
         ConflictException,
       );
 
-      expect(prisma.space.findFirst).not.toHaveBeenCalled();
-    });
-
-    it('rejects when no space exists with that slug', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
-      prisma.space.findFirst.mockResolvedValue(null);
-
-      await expect(service.signup(baseInput)).rejects.toThrow(
-        NotFoundException,
-      );
-
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
 
-    it('rejects a MEMBER signup that supplies neither spaceId nor spaceSlug', async () => {
+    it('creates a plain MEMBER account with spaceId: null — no space lookup at all', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.signup({
-          name: 'Bob',
-          email: 'bob@example.com',
-          password: 'a-real-password',
-          role: 'MEMBER' as const,
-        }),
-      ).rejects.toThrow(BadRequestException);
-
-      expect(prisma.space.findFirst).not.toHaveBeenCalled();
-      expect(prisma.user.create).not.toHaveBeenCalled();
-    });
-
-    it('joins the existing space as MEMBER and returns a signed token', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
-      prisma.space.findFirst.mockResolvedValue({
-        id: 'space-existing',
-        name: 'Acme Coworking',
-        slug: 'acme-coworking',
-      });
       prisma.user.create.mockResolvedValue({
         id: 'user-bob',
         email: 'bob@example.com',
         name: 'Bob',
         role: Role.MEMBER,
-        spaceId: 'space-existing',
+        spaceId: null,
       });
 
       const result = await service.signup(baseInput);
 
-      expect(prisma.space.findFirst).toHaveBeenCalledWith({
-        where: { deletedAt: null, slug: 'acme-coworking' },
-      });
+      // The old flow looked a space up by id/slug here — gone. Signup
+      // never touches Space at all anymore.
+      expect(prisma.space.findFirst).not.toHaveBeenCalled();
       expect(prisma.user.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           name: 'Bob',
           email: 'bob@example.com',
           role: Role.MEMBER,
-          spaceId: 'space-existing',
+          spaceId: null,
         }),
       });
 
@@ -345,71 +310,20 @@ describe('AuthService', () => {
         email: 'bob@example.com',
         name: 'Bob',
         role: Role.MEMBER,
-        spaceId: 'space-existing',
+        spaceId: null,
       });
 
       const decoded = jwtService.verify(result.accessToken) as {
         sub: string;
         role: string;
-        spaceId: string;
+        spaceId: string | null;
       };
       expect(decoded.role).toBe(Role.MEMBER);
-      expect(decoded.spaceId).toBe('space-existing');
-    });
-
-    it('joins by spaceId when browsing GET /spaces/public instead of typing a code', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
-      prisma.space.findFirst.mockResolvedValue({
-        id: 'space-browsed',
-        name: 'Acme Coworking',
-        slug: 'acme-coworking',
-      });
-      prisma.user.create.mockResolvedValue({
-        id: 'user-carol',
-        email: 'carol@example.com',
-        name: 'Carol',
-        role: Role.MEMBER,
-        spaceId: 'space-browsed',
-      });
-
-      const result = await service.signup({
-        name: 'Carol',
-        email: 'carol@example.com',
-        password: 'a-real-password',
-        role: 'MEMBER' as const,
-        spaceId: 'space-browsed',
-      });
-
-      // spaceId wins over any stray spaceSlug, and a deleted space is
-      // excluded the same way the slug path excludes it.
-      expect(prisma.space.findFirst).toHaveBeenCalledWith({
-        where: { deletedAt: null, id: 'space-browsed' },
-      });
-      expect(result.user.spaceId).toBe('space-browsed');
-    });
-
-    it('rejects joining a space that has since closed (deletedAt set), whether by id or slug', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
-      prisma.space.findFirst.mockResolvedValue(null); // the LIVE filter excludes it
-
-      await expect(
-        service.signup({
-          name: 'Dee',
-          email: 'dee@example.com',
-          password: 'a-real-password',
-          role: 'MEMBER' as const,
-          spaceId: 'space-closed',
-        }),
-      ).rejects.toThrow(NotFoundException);
+      expect(decoded.spaceId).toBeNull();
     });
 
     it('surfaces a race-condition email collision as a Conflict, not a raw 500', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      prisma.space.findFirst.mockResolvedValue({
-        id: 'space-existing',
-        name: 'Acme Coworking',
-        slug: 'acme-coworking',
-      });
       prisma.user.create.mockRejectedValue(uniqueConstraintError(['email']));
 
       await expect(service.signup(baseInput)).rejects.toThrow(
