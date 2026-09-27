@@ -17,6 +17,8 @@ import {
 
 interface DeskFormProps {
   initialName?: string;
+  initialHourlyRateCents?: number | null;
+  initialDailyRateCents?: number | null;
   deskId?: string;
   onSuccess?: () => void;
   onCancel?: () => void;
@@ -24,6 +26,8 @@ interface DeskFormProps {
 
 export default function DeskForm({ 
   initialName = '', 
+  initialHourlyRateCents = null,
+  initialDailyRateCents = null,
   deskId, 
   onSuccess,
   onCancel 
@@ -31,6 +35,12 @@ export default function DeskForm({
   const { zoneId } = useParams<{ zoneId: string }>();
   const router = useRouter();
   const [name, setName] = useState(initialName);
+  const [hourlyRate, setHourlyRate] = useState(
+    initialHourlyRateCents != null ? (initialHourlyRateCents / 100).toString() : '',
+  );
+  const [dailyRate, setDailyRate] = useState(
+    initialDailyRateCents != null ? (initialDailyRateCents / 100).toString() : '',
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -58,6 +68,18 @@ export default function DeskForm({
     return true;
   };
 
+  // A dollar-and-cents string (e.g. "5", "4.50") -> integer cents, or
+  // null for a blank field. Rejects anything that isn't a plain
+  // non-negative number so a stray "abc" can't silently become NaN
+  // cents on the wire.
+  function parseRateCents(value: string): number | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return Math.round(num * 100);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -65,6 +87,15 @@ export default function DeskForm({
     setSuccess(false);
 
     if (!validateName(name)) {
+      setSubmitting(false);
+      return;
+    }
+
+    const hourlyRateCents = parseRateCents(hourlyRate);
+    const dailyRateCents = parseRateCents(dailyRate);
+
+    if (!isEditing && hourlyRateCents == null && dailyRateCents == null) {
+      setValidationError('Set an hourly rate, a daily rate, or both');
       setSubmitting(false);
       return;
     }
@@ -79,9 +110,11 @@ export default function DeskForm({
             'Content-Type': 'application/json',
             ...getAuthHeaders(),
           },
-          body: JSON.stringify({ 
-            name: name.trim(), 
-            zoneId 
+          body: JSON.stringify({
+            name: name.trim(),
+            zoneId,
+            ...(hourlyRateCents != null ? { hourlyRateCents } : {}),
+            ...(dailyRateCents != null ? { dailyRateCents } : {}),
           }),
         }
       );
@@ -162,6 +195,45 @@ export default function DeskForm({
               {name.length}/50
             </span>
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+              Hourly Rate ($)
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={hourlyRate}
+              onChange={(e) => setHourlyRate(e.target.value)}
+              placeholder="e.g. 5.00"
+              className="w-full border-2 border-slate-200 rounded-lg px-4 py-2.5 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                       placeholder:text-slate-400 transition-all"
+            />
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-2">
+              Daily Rate ($)
+            </label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={dailyRate}
+              onChange={(e) => setDailyRate(e.target.value)}
+              placeholder="e.g. 30.00"
+              className="w-full border-2 border-slate-200 rounded-lg px-4 py-2.5 text-sm
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
+                       placeholder:text-slate-400 transition-all"
+            />
+          </div>
+          <p className="col-span-2 text-xs text-slate-400 -mt-2">
+            Set at least one. A booking is charged by the hour if it's under a
+            day, otherwise by the day (when both are set).
+          </p>
         </div>
 
         {validationError && (
