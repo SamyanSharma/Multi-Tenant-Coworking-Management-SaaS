@@ -78,6 +78,9 @@ export class BookingsService {
   // Space.priceCents at all, and every booking attempt would then fail
   // with "not configured", which is exactly what was reported).
   //
+  // Both rates set: Total = min(hourly x hours,
+  // days x daily + remainingHours x hourly) — see below.
+  //
   // Rounding: duration is rounded to the nearest whole minute first
   // (booking times only ever carry minute precision in practice; this
   // just guards against float drift in the ms subtraction below), then
@@ -105,22 +108,32 @@ export class BookingsService {
       (endTime.getTime() - startTime.getTime()) / (60 * 1000),
     );
     const durationHours = durationMinutes / 60;
-    const durationDays = durationHours / 24;
 
-    // Both rates set: bill by the day once the stay reaches 24h,
-    // otherwise by the hour. A manager who wants only one billing
-    // unit simply leaves the other rate unset, which skips this branch.
-    if (hourlyRateCents != null && dailyRateCents != null) {
-      return durationHours >= 24
-        ? dailyRateCents * Math.max(1, Math.ceil(durationDays))
-        : hourlyRateCents * Math.max(1, Math.ceil(durationHours));
+    // Daily rate only: every started day is billed as a full day.
+    if (hourlyRateCents == null) {
+      const days = Math.max(1, Math.ceil(durationHours / 24));
+      return dailyRateCents! * days;
     }
 
-    if (dailyRateCents != null) {
-      return dailyRateCents * Math.max(1, Math.ceil(durationDays));
+    // Any partial hour is rounded UP first, minimum 1 hour.
+    const totalHours = Math.max(1, Math.ceil(durationHours));
+
+    // Hourly rate only.
+    if (dailyRateCents == null) {
+      return hourlyRateCents * totalHours;
     }
 
-    return hourlyRateCents! * Math.max(1, Math.ceil(durationHours));
+    // Both rates set — take the cheaper of:
+    //   (a) pure hourly:             hourly x totalHours
+    //   (b) full days + leftover hrs: days x daily + remainingHours x hourly
+    // so a 25h booking costs 1 day + 1 hour, not 2 full days.
+    const days = Math.floor(totalHours / 24);
+    const remainingHours = totalHours % 24;
+    const hourlyOnly = hourlyRateCents * totalHours;
+    const daysPlusHours =
+      days * dailyRateCents + remainingHours * hourlyRateCents;
+
+    return Math.min(hourlyOnly, daysPlusHours);
   }
 
 

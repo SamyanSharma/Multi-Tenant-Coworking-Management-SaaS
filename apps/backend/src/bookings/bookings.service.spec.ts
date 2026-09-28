@@ -810,7 +810,7 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
     });
   });
 
-  it('with both rates set, uses the daily rate once the stay reaches 24h and the hourly rate below that', async () => {
+  it('with both rates set, charges min(hourly x hours, days x daily + remaining hours x hourly) — 25h is 1 day + 1 hour, not 2 days', async () => {
     const { service, prisma } = buildDeps();
     prisma.desk.findUnique.mockResolvedValue({
       id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
@@ -818,10 +818,10 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
     });
     prisma.booking.create
       .mockResolvedValueOnce({ id: 'b1', amountCents: 2000 })
-      .mockResolvedValueOnce({ id: 'b2', amountCents: 4000 });
+      .mockResolvedValueOnce({ id: 'b2', amountCents: 4500 });
     prisma.booking.update.mockResolvedValue({ id: 'b1' });
 
-    // 3 hours -> hourly path: 500 * 3 = 1500... wait must be ceil(3)=3 -> 1500
+    // 3 hours -> 500 * 3 = 1500
     const shortStart = new Date(now() + HOUR).toISOString();
     const shortEnd = new Date(now() + HOUR + 3 * HOUR).toISOString();
     await service.create(dto(shortStart, shortEnd), 'space-1', 'user-1');
@@ -829,12 +829,12 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
       data: expect.objectContaining({ amountCents: 1500 }),
     });
 
-    // 25 hours -> daily path: 4000 * ceil(25/24) = 4000 * 2 = 8000
+    // 25 hours -> 1 day + 1 hour = 4000 + 500 = 4500 (NOT 2 days = 8000)
     const longStart = new Date(now() + HOUR).toISOString();
     const longEnd = new Date(now() + HOUR + 25 * HOUR).toISOString();
     await service.create(dto(longStart, longEnd), 'space-1', 'user-1');
     expect(prisma.booking.create).toHaveBeenNthCalledWith(2, {
-      data: expect.objectContaining({ amountCents: 8000 }),
+      data: expect.objectContaining({ amountCents: 4500 }),
     });
   });
 
