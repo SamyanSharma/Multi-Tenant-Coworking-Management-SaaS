@@ -87,13 +87,15 @@ async function main() {
 
   const member = await prisma.user.upsert({
     where: { email: 'member@test-space.dev' },
-    update: { spaceId: space.id, role: Role.MEMBER, password: passwordHash },
+    update: { spaceId: null, role: Role.MEMBER, password: passwordHash },
     create: {
       id: DEV_MEMBER_ID,
       email: 'member@test-space.dev',
       name: 'Test Member',
       role: Role.MEMBER,
-      spaceId: space.id,
+      // No space: the dev member starts on the browse screen and picks
+      // any live space, same as a freshly signed-up member.
+      spaceId: null,
       password: passwordHash,
     },
   });
