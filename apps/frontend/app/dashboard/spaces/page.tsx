@@ -47,8 +47,11 @@ export default function SpacesPage() {
   // any of the /spaces/me fetching below even starts: that endpoint
   // 403s for a spaceless Member (TenantGuard has nothing to scope to),
   // so there's no point spinning a loader first.
-  if (role === 'MEMBER' && !authSpaceId) {
-    return <BrowseAndJoinSpaces />;
+  // Members are not locked to one space: they always see every live
+  // space and can switch at any time (join reissues the JWT with the
+  // chosen spaceId). Their current space, if any, is marked in the list.
+  if (role === 'MEMBER') {
+    return <BrowseAndJoinSpaces currentSpaceId={authSpaceId} />;
   }
 
   return <MySpaces role={role} />;
@@ -59,7 +62,7 @@ export default function SpacesPage() {
 // page used to call before a space choice was removed from signup
 // entirely — now it's reused here, post-signup, for exactly the "view
 // all available spaces" browsing experience that replaces it.
-function BrowseAndJoinSpaces() {
+function BrowseAndJoinSpaces({ currentSpaceId }: { currentSpaceId: string | null }) {
   const setAuth = useAuthStore((s) => s.setAuth);
   const router = useRouter();
 
@@ -119,7 +122,9 @@ function BrowseAndJoinSpaces() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Browse Spaces</h1>
-          <p className="text-sm text-slate-500">Pick a space to join</p>
+          <p className="text-sm text-slate-500">
+            {currentSpaceId ? 'Open your space or switch to another one' : 'Pick a space to join'}
+          </p>
         </div>
       </div>
 
@@ -227,7 +232,11 @@ function BrowseAndJoinSpaces() {
                   ) : (
                     <ArrowRight className="w-4 h-4" />
                   )}
-                  Join this space
+                  {space.id === currentSpaceId
+                    ? 'Open (current space)'
+                    : currentSpaceId
+                      ? 'Switch to this space'
+                      : 'Join this space'}
                 </button>
               </div>
             </div>
