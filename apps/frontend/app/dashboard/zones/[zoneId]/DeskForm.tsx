@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getAuthHeaders } from '@/lib/api';
 import { 
@@ -44,6 +44,13 @@ export default function DeskForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimer.current) clearTimeout(successTimer.current);
+    };
+  }, []);
 
   const isEditing = Boolean(deskId);
 
@@ -123,13 +130,16 @@ export default function DeskForm({
         throw new Error(body?.message ?? `Request failed (${res.status})`);
       }
 
+      // The request finished, so stop the "Saving..." state right away
+      // (it used to stay true forever because this form never unmounts
+      // after a save). Refresh the parent's list immediately, then clear
+      // the success banner after a moment so another desk can be added.
+      setSubmitting(false);
       setSuccess(true);
       setName('');
-      
-      setTimeout(() => {
-        onSuccess?.();
-      }, 500);
-      
+      onSuccess?.();
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => setSuccess(false), 2500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setSubmitting(false);
@@ -262,7 +272,7 @@ export default function DeskForm({
                 {isEditing ? 'Desk updated successfully!' : 'Desk created successfully!'}
               </p>
               <p className="text-sm text-green-700">
-                Redirecting...
+                Refreshing the desk list...
               </p>
             </div>
           </div>
