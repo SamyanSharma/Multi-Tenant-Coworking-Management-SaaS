@@ -1,4 +1,4 @@
-import { ForbiddenException, ConflictException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { SpacesService } from './spaces.service';
 
 function build(over: Record<string, any> = {}) {
@@ -116,11 +116,26 @@ describe('SpacesService.join', () => {
     await expect(service.join('user-1', 's1')).rejects.toThrow(ForbiddenException);
   });
 
-  it('rejects a Member who has already joined a space — no switching in this version', async () => {
-    const { service, prisma } = build({ joiningUser: { id: 'user-1', role: 'MEMBER', spaceId: 'already-joined' } });
+  it('lets a Member who is already in a space switch to another live space', async () => {
+    const { service, prisma, authService } = build({ joiningUser: { id: 'user-1', role: 'MEMBER', spaceId: 'already-joined' } });
 
-    await expect(service.join('user-1', 's1')).rejects.toThrow(ConflictException);
+    const result = await service.join('user-1', 's1');
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { spaceId: 's1' },
+    });
+    expect(authService.buildAuthResult).toHaveBeenCalled();
+    expect(result.accessToken).toBe('fresh-token');
+  });
+
+  it('re-selecting the current space reissues a token without a write', async () => {
+    const { service, prisma } = build({ joiningUser: { id: 'user-1', role: 'MEMBER', spaceId: 's1' } });
+
+    const result = await service.join('user-1', 's1');
+
     expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(result.accessToken).toBe('fresh-token');
   });
 
   it('rejects joining a space that does not exist or has been closed (the LIVE filter excludes it)', async () => {

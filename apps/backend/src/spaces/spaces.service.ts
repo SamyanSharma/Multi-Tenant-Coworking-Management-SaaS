@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
@@ -126,12 +125,6 @@ async updatePrice(spaceId: string, priceCents: number) {
       throw new ForbiddenException('Only a Member account can join a space');
     }
 
-    if (user.spaceId) {
-      throw new ConflictException(
-        'You have already joined a space — there is no switching in this version',
-      );
-    }
-
     const space = await this.prisma.space.findFirst({
       where: { id: spaceId, ...LIVE },
     });
@@ -142,10 +135,17 @@ async updatePrice(spaceId: string, priceCents: number) {
       );
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: { spaceId: space.id },
-    });
+    // Members may switch spaces freely: user.spaceId is their *active*
+    // space, and switching just repoints it and reissues the JWT. Old
+    // bookings keep their own Booking.spaceId, so history is preserved.
+    // Re-selecting the current space is a no-op write, not an error.
+    const updated =
+      user.spaceId === space.id
+        ? user
+        : await this.prisma.user.update({
+            where: { id: userId },
+            data: { spaceId: space.id },
+          });
 
     return this.authService.buildAuthResult(updated);
   }
