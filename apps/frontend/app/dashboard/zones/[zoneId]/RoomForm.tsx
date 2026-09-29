@@ -12,7 +12,6 @@ import {
   Plus,
   X,
   Users,
-  Info,
   Edit3,
   Minus,
   PlusCircle
@@ -348,13 +347,6 @@ export default function RoomForm({
             </div>
           </div>
         )}
-
-        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-blue-700">
-            Room will be added to zone ID: {zoneId}
-          </p>
-        </div>
 
         <div className="flex gap-3 pt-2">
           <button

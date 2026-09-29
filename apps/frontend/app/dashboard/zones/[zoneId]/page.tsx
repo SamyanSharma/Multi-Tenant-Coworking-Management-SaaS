@@ -218,7 +218,6 @@ export default function ZoneDetailPage() {
               </div>
               <div>
                 <h1 className="text-3xl font-bold text-white">{zone.name}</h1>
-                <p className="text-sm text-slate-400">Zone ID: {zone.id}</p>
               </div>
             </div>
             

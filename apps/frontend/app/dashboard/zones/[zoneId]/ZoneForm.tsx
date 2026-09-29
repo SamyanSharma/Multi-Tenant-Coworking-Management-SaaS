@@ -10,7 +10,6 @@ import {
   Save,
   X,
   Edit3,
-  Info,
   Building2
 } from 'lucide-react';
 
@@ -214,13 +213,6 @@ export default function ZoneForm({
             </div>
           </div>
         )}
-
-        <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-blue-700">
-            Zone ID: {zoneId}
-          </p>
-        </div>
 
         {hasChanges && (
           <div className="flex items-start gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
