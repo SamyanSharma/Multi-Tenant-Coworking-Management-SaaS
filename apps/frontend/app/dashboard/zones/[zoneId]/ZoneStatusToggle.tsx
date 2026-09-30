@@ -61,8 +61,8 @@ export default function ZoneStatusToggle({
           </p>
           <p className="text-xs text-slate-500">
             {shown
-              ? 'Members can see this zone.'
-              : 'Marked inactive. It is kept, and can be switched back on at any time.'}
+              ? 'Members can see this zone and book its desks and rooms.'
+              : 'Hidden from members and not bookable. Existing bookings are kept. Switch it back on any time.'}
           </p>
         </div>
         <button
