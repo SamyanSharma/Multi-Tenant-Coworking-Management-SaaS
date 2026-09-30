@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getAuthHeaders } from '@/lib/api';
 import { 
   MapPin, 
@@ -32,6 +32,13 @@ export default function ZoneForm({
   const [success, setSuccess] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimer.current) clearTimeout(successTimer.current);
+    };
+  }, []);
 
   const validateName = (value: string): boolean => {
     if (!value.trim()) {
@@ -105,14 +112,16 @@ export default function ZoneForm({
 
       const updatedZone = await res.json();
 
+      // The form stays mounted after a save (the parent only refreshes its
+      // data), so "saving" must be cleared here or the button sticks on
+      // "Saving..." forever.
+      setSaving(false);
       setName(updatedZone.name ?? name.trim());
       setSuccess(true);
       setHasChanges(false);
-      
-      setTimeout(() => {
-        onSuccess();
-      }, 500);
-      
+      onSuccess();
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => setSuccess(false), 2500);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to update zone',
