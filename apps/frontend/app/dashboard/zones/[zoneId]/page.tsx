@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 import { computeCapacity } from '@/lib/capacity';
 import ZoneForm from './ZoneForm';
+import ZoneStatusToggle from './ZoneStatusToggle';
 import DeskForm from './DeskForm';
 import RoomForm from './RoomForm';
 import FloorPlan from '@/components/FloorPlan';
@@ -52,6 +53,7 @@ interface Room {
 interface ZoneDetail {
   id: string;
   name: string;
+  isActive?: boolean; // absent only on an API that predates the column
 }
 
 export default function ZoneDetailPage() {
@@ -265,7 +267,13 @@ export default function ZoneDetailPage() {
             <div className="p-2 bg-amber-50 rounded-lg inline-flex mb-2">
               <Activity className="w-5 h-5 text-amber-600" />
             </div>
-            <div className="text-2xl font-bold text-slate-900">Active</div>
+            <div
+              className={`text-2xl font-bold ${
+                zone.isActive === false ? 'text-slate-500' : 'text-slate-900'
+              }`}
+            >
+              {zone.isActive === false ? 'Inactive' : 'Active'}
+            </div>
             <div className="text-xs text-slate-500">Status</div>
           </div>
         </div>
@@ -355,6 +363,23 @@ export default function ZoneDetailPage() {
               onSuccess={() => setRefreshKey((k) => k + 1)}
             />
           </div>
+
+          {isManager && (
+            <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-amber-50 rounded-lg">
+                  <Activity className="w-5 h-5 text-amber-600" />
+                </div>
+                <h2 className="text-lg font-semibold text-slate-900">Zone Status</h2>
+              </div>
+              <ZoneStatusToggle
+                key={String(zone.isActive !== false)}
+                zoneId={zone.id}
+                isActive={zone.isActive !== false}
+                onChanged={() => setRefreshKey((k) => k + 1)}
+              />
+            </div>
+          )}
 
           {isManager && (
             <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-lg" data-testid="danger-zone">

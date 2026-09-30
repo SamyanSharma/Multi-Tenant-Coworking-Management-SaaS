@@ -24,6 +24,7 @@ import {
 interface Zone {
   id: string;
   name: string;
+  isActive?: boolean;
 }
 
 export default function ZonesListPage() {
@@ -202,6 +203,11 @@ export default function ZonesListPage() {
                 <h3 className="font-semibold text-slate-900 text-lg mb-1 
                              group-hover:text-blue-600 transition-colors">
                   {zone.name}
+                  {zone.isActive === false && (
+                    <span className="ml-2 align-middle rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      Inactive
+                    </span>
+                  )}
                 </h3>
                 <p className="text-xs text-slate-500">Zone ID: {zone.id.slice(0, 8)}...</p>
               </div>
