@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getAuthHeaders } from '@/lib/api';
 import { 
@@ -50,6 +50,13 @@ export default function RoomForm({
   const [error, setError] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimer.current) clearTimeout(successTimer.current);
+    };
+  }, []);
 
   const isEditing = Boolean(roomId);
 
@@ -145,14 +152,16 @@ export default function RoomForm({
         throw new Error(body?.message ?? `Request failed (${res.status})`);
       }
 
+      // Same fix as DeskForm: this form never unmounts after a save, so
+      // clear the "Saving..." state now, refresh the parent list right
+      // away, and let the success banner fade so another room can be added.
+      setSubmitting(false);
       setSuccess(true);
       setName('');
       setCapacity(1);
-      
-      setTimeout(() => {
-        onSuccess?.();
-      }, 500);
-      
+      onSuccess?.();
+      if (successTimer.current) clearTimeout(successTimer.current);
+      successTimer.current = setTimeout(() => setSuccess(false), 2500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setSubmitting(false);
@@ -342,7 +351,7 @@ export default function RoomForm({
                 {isEditing ? 'Room updated successfully!' : 'Room created successfully!'}
               </p>
               <p className="text-sm text-green-700">
-                Redirecting...
+                Refreshing the room list...
               </p>
             </div>
           </div>
