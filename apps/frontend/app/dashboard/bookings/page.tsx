@@ -51,6 +51,11 @@ interface Booking {
   userName?: string | null;
   userEmail?: string | null;
   zoneName?: string | null;
+  // Which space this booking's desk/room belongs to — matters once a
+  // Member can hold bookings in more than one space (see the
+  // space-switch feature), where "Second Floor - Desk 1" alone would
+  // be ambiguous.
+  spaceName?: string | null;
 }
 
 interface ActivePayment {
@@ -409,6 +414,7 @@ export default function BookingsPage() {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <h3 className="font-semibold text-slate-900 text-sm">
                         {booking.bookableType === 'DESK' ? 'Desk' : 'Room'} ·{' '}
+                        {booking.spaceName ? `${booking.spaceName} - ` : ''}
                         {booking.zoneName ? `${booking.zoneName} - ` : ''}
                         {booking.bookableName ?? booking.bookableId}
                       </h3>

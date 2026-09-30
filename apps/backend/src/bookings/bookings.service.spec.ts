@@ -696,7 +696,7 @@ describe('BookingsService — Stage 9 snapshots', () => {
     expect('userId' in whereArg).toBe(false);
   });
 
-  it('attaches userName/userEmail and zoneName by looking up the booker and the desk/room\'s zone', async () => {
+  it('attaches userName/userEmail/zoneName/spaceName by looking up the booker and the desk/room\'s zone and space', async () => {
     const { service, prisma } = buildDeps();
     prisma.booking.findMany.mockResolvedValue([
       {
@@ -719,16 +719,26 @@ describe('BookingsService — Stage 9 snapshots', () => {
       { id: 'user-2', name: null, email: 'bob@acme.test' },
     ]);
     prisma.desk.findMany.mockResolvedValue([
-      { id: 'desk-1', zone: { name: 'Main Floor' } },
+      { id: 'desk-1', zone: { name: 'Main Floor', space: { name: 'Acme HQ' } } },
     ]);
     prisma.room.findMany.mockResolvedValue([
-      { id: 'room-1', zone: { name: 'Annex' } },
+      { id: 'room-1', zone: { name: 'Annex', space: { name: 'Acme HQ' } } },
     ]);
 
     const result = await service.findAllForSpace('space-1');
 
-    expect(result[0]).toMatchObject({ userName: 'Alice', userEmail: 'alice@acme.test', zoneName: 'Main Floor' });
-    expect(result[1]).toMatchObject({ userName: null, userEmail: 'bob@acme.test', zoneName: 'Annex' });
+    expect(result[0]).toMatchObject({
+      userName: 'Alice',
+      userEmail: 'alice@acme.test',
+      zoneName: 'Main Floor',
+      spaceName: 'Acme HQ',
+    });
+    expect(result[1]).toMatchObject({
+      userName: null,
+      userEmail: 'bob@acme.test',
+      zoneName: 'Annex',
+      spaceName: 'Acme HQ',
+    });
   });
 
   it('does not query user/desk/room at all for an empty booking list', async () => {

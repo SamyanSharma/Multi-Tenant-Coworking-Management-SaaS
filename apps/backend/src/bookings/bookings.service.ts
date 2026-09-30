@@ -169,16 +169,19 @@ export class BookingsService {
     return this.attachDisplayFields(reconciled);
   }
 
-  // Attaches who booked it (userName/userEmail) and which zone the
-  // desk/room lives in (zoneName) — a Space Manager needs both to make
-  // sense of their space's activity, which the raw Booking row can't
-  // show on its own. Looked up live via userId/bookableId rather than
+  // Attaches who booked it (userName/userEmail) and which zone/space the
+  // desk/room lives in (zoneName/spaceName) — a Space Manager needs both
+  // to make sense of their space's activity, which the raw Booking row
+  // can't show on its own. A Member also needs spaceName now that they
+  // can switch between spaces (see the space-switch feature): "Second
+  // Floor - Desk 1" is ambiguous once a member has bookings in more than
+  // one space. Looked up live via userId/bookableId rather than
   // snapshotted at booking time: unlike bookableName (which must
   // survive the desk/room itself being deleted, so the booking stays
   // legible), User/Desk/Room rows are never hard-deleted (see the
   // schema's own comments to that effect), so this join is always
-  // safe — even after a soft delete, the row and its zone are still
-  // there to look up.
+  // safe — even after a soft delete, the row and its zone/space are
+  // still there to look up.
   private async attachDisplayFields<
     T extends {
       userId: string;
@@ -191,6 +194,7 @@ export class BookingsService {
         userName: string | null;
         userEmail: string | null;
         zoneName: string | null;
+        spaceName: string | null;
       })[];
     }
 
@@ -218,27 +222,41 @@ export class BookingsService {
       deskIds.length
         ? this.prisma.desk.findMany({
             where: { id: { in: deskIds } },
-            select: { id: true, zone: { select: { name: true } } },
+            select: {
+              id: true,
+              zone: { select: { name: true, space: { select: { name: true } } } },
+            },
           })
         : Promise.resolve([]),
       roomIds.length
         ? this.prisma.room.findMany({
             where: { id: { in: roomIds } },
-            select: { id: true, zone: { select: { name: true } } },
+            select: {
+              id: true,
+              zone: { select: { name: true, space: { select: { name: true } } } },
+            },
           })
         : Promise.resolve([]),
     ]);
 
     const userById = new Map(users.map((u) => [u.id, u]));
     const zoneNameByBookableId = new Map<string, string>();
-    for (const d of desks) zoneNameByBookableId.set(d.id, d.zone.name);
-    for (const r of rooms) zoneNameByBookableId.set(r.id, r.zone.name);
+    const spaceNameByBookableId = new Map<string, string>();
+    for (const d of desks) {
+      zoneNameByBookableId.set(d.id, d.zone.name);
+      spaceNameByBookableId.set(d.id, d.zone.space.name);
+    }
+    for (const r of rooms) {
+      zoneNameByBookableId.set(r.id, r.zone.name);
+      spaceNameByBookableId.set(r.id, r.zone.space.name);
+    }
 
     return bookings.map((b) => ({
       ...b,
       userName: userById.get(b.userId)?.name ?? null,
       userEmail: userById.get(b.userId)?.email ?? null,
       zoneName: zoneNameByBookableId.get(b.bookableId) ?? null,
+      spaceName: spaceNameByBookableId.get(b.bookableId) ?? null,
     }));
   }
 
