@@ -1,29 +1,21 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
+import * as request from 'supertest';
+import { bootstrapE2e, E2eContext } from './helpers/e2e-app';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let ctx: E2eContext;
 
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
+  beforeAll(async () => {
+    ctx = await bootstrapE2e();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
+  afterAll(async () => {
+    await ctx.app.close();
+  });
+
+  it('GET / is public (health check) and needs no token', async () => {
+    await request(ctx.app.getHttpServer())
       .get('/')
       .expect(200)
       .expect('Hello World!');
-  });
-
-  afterEach(async () => {
-    await app.close();
   });
 });
