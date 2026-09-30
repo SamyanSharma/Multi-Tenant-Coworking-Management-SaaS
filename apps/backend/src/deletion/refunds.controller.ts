@@ -3,10 +3,8 @@ import {
   Param,
   Post,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { DeletionService } from './deletion.service';
 import { requireSpaceId } from '../common/require-space';
@@ -18,7 +16,6 @@ import { requireSpaceId } from '../common/require-space';
 export class RefundsController {
   constructor(private readonly deletionService: DeletionService) {}
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post(':id/refund/retry')
   retry(@Param('id') id: string, @Req() req: Request) {

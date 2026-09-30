@@ -8,14 +8,12 @@ import {
   Param,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { RoomsService } from './rooms.service';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { DeletionService } from '../deletion/deletion.service';
-import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { requireSpaceId } from '../common/require-space';
 
@@ -26,7 +24,6 @@ export class RoomsController {
     private readonly deletionService: DeletionService,
   ) {}
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
@@ -36,7 +33,6 @@ export class RoomsController {
     );
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get(':id')
   findOne(@Param('id') id: string, @Req() req: Request) {
@@ -47,14 +43,12 @@ export class RoomsController {
     );
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post()
   create(@Body() dto: CreateRoomDto, @Req() req: Request) {
     return this.roomsService.create(dto, requireSpaceId(req));
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Patch(':id')
   update(
@@ -65,14 +59,12 @@ export class RoomsController {
     return this.roomsService.update(id, dto, requireSpaceId(req));
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Get(':id/delete-impact')
   deleteImpact(@Param('id') id: string, @Req() req: Request) {
     return this.deletionService.getImpact('ROOM', id, requireSpaceId(req));
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Delete(':id')
   remove(

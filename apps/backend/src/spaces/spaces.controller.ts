@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Body,
-  UseGuards,
   Req,
   Param,
 } from '@nestjs/common';
@@ -11,7 +10,6 @@ import type { Request } from 'express';
 
 import { SpacesService } from './spaces.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
-import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
@@ -23,7 +21,6 @@ import { getCallerUserId } from '../auth/caller.util';
 export class SpacesController {
   constructor(private readonly spacesService: SpacesService) {}
 
-  @UseGuards(RbacGuard)
   @Roles(Role.PLATFORM_ADMIN)
   @SkipTenantCheck()
   @Get()
@@ -42,6 +39,7 @@ export class SpacesController {
     return this.spacesService.findPublic();
   }
 
+  @Roles(Role.PLATFORM_ADMIN, Role.SPACE_MANAGER, Role.MEMBER)
   @Get('me')
   findOwn(@Req() req: Request) {
     return this.spacesService.findOwnSpace(
@@ -51,6 +49,7 @@ export class SpacesController {
   }
 
 
+  @Roles(Role.PLATFORM_ADMIN, Role.SPACE_MANAGER, Role.MEMBER)
   @Get(':id')
   findById(
     @Param('id') id: string,
@@ -63,14 +62,12 @@ export class SpacesController {
     return this.spacesService.findOwnSpace(id, req.user?.role === Role.MEMBER);
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.PLATFORM_ADMIN)
   @Post()
   create(@Body() dto: CreateSpaceDto) {
     return this.spacesService.create(dto);
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post('me/price')
   updatePrice(
@@ -90,7 +87,6 @@ export class SpacesController {
   // runs, since they don't have one yet — that's the whole point of
   // this endpoint. Returns a fresh accessToken (the old one's JWT still
   // carries spaceId: null) — same response shape as login/signup.
-  @UseGuards(RbacGuard)
   @Roles(Role.MEMBER)
   @SkipTenantCheck()
   @Post(':id/join')

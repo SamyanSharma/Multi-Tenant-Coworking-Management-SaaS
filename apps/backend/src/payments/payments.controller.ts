@@ -3,17 +3,14 @@ import {
   Get,
   Post,
   Req,
-  UseGuards,
   BadRequestException,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { StripeService } from './stripe.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 
 @Controller('payments')
-@UseGuards(RbacGuard)
 export class PaymentsController {
   constructor(
     private readonly stripeService: StripeService,

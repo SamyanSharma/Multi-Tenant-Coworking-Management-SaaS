@@ -1,13 +1,11 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { AnalyticsService } from './analytics.service';
-import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { requireSpaceId } from '../common/require-space';
 
 
 @Controller('analytics')
-@UseGuards(RbacGuard)
 @Roles(Role.SPACE_MANAGER, Role.PLATFORM_ADMIN)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}

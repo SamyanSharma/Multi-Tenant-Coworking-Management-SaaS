@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { TenantGuard } from './auth/tenant.guard';
+import { RbacGuard } from './auth/rbac.guard';
 import { SpacesModule } from './spaces/spaces.module';
 import { ZonesModule } from './zones/zones.module';
 import { DesksModule } from './desks/desks.module';
@@ -35,7 +36,9 @@ import { AdminModule } from './admin/admin.module';
     AppService,
     // Order matters: Nest runs global guards in registration order.
     // JwtAuthGuard MUST run before TenantGuard/RbacGuard, since both
-    // of those now read req.user, which only JwtAuthGuard sets.
+    // of those read req.user, which only JwtAuthGuard sets.
+    // RbacGuard is global and deny-by-default: every route needs either
+    // @Public() or @Roles(...) — see rbac.guard.ts.
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
@@ -43,6 +46,10 @@ import { AdminModule } from './admin/admin.module';
     {
       provide: APP_GUARD,
       useClass: TenantGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RbacGuard,
     },
   ],
 })

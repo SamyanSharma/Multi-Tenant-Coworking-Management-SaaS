@@ -8,13 +8,11 @@ import {
   Param,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { ZonesService } from './zones.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
 import { UpdateZoneDto } from './dto/update-zone.dto';
-import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { DeletionService } from '../deletion/deletion.service';
 import { requireSpaceId } from '../common/require-space';
@@ -26,7 +24,6 @@ export class ZonesController {
     private readonly deletionService: DeletionService,
   ) {}
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
@@ -36,7 +33,6 @@ export class ZonesController {
     );
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get(':id')
   findOne(
@@ -50,7 +46,6 @@ export class ZonesController {
     );
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Post()
   create(
@@ -63,7 +58,6 @@ export class ZonesController {
     );
   }
 
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Patch(':id')
   update(
@@ -79,7 +73,6 @@ export class ZonesController {
   }
 
   // Stage 9: what would deleting this zone remove / cancel / refund?
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Get(':id/delete-impact')
   deleteImpact(@Param('id') id: string, @Req() req: Request) {
@@ -88,7 +81,6 @@ export class ZonesController {
 
   // Soft-deletes the zone AND everything in it. With upcoming bookings it
   // answers 409 ACTIVE_BOOKINGS until called again with confirmRefund=true.
-  @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER)
   @Delete(':id')
   remove(
