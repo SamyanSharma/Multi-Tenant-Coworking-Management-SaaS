@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AnalyticsService } from './analytics.service';
 import { RbacGuard } from '../auth/rbac.guard';
@@ -15,6 +15,15 @@ export class AnalyticsController {
   @Get('bookings-per-zone')
   bookingsPerZone(@Req() req: Request) {
     return this.analyticsService.bookingsPerZone(requireSpaceId(req));
+  }
+
+  // ?days=30 (clamped to 7..90 in the service; anything unparsable = 30)
+  @Get('trends')
+  trends(@Req() req: Request, @Query('days') days?: string) {
+    return this.analyticsService.trends(
+      requireSpaceId(req),
+      days === undefined ? undefined : Number(days),
+    );
   }
 
   @Get('summary')

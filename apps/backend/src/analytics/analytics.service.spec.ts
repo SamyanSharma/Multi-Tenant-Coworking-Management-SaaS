@@ -225,3 +225,82 @@ describe('AnalyticsService.spaceSummary — scoping (Stage 9)', () => {
     });
   });
 });
+
+describe('AnalyticsService.trends', () => {
+  const NOW = new Date('2026-09-30T10:00:00.000Z');
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function build(rows: any[] = [], groups: any[] = []) {
+    const prisma: any = {
+      booking: {
+        findMany: jest.fn().mockResolvedValue(rows),
+        groupBy: jest.fn().mockResolvedValue(groups),
+      },
+    };
+    return { service: new AnalyticsService(prisma), prisma };
+  }
+
+  it('returns one zero-filled row per day ending today (UTC), oldest first', async () => {
+    const { service } = build();
+
+    const result = await service.trends('s1', 30);
+
+    expect(result.days).toBe(30);
+    expect(result.series).toHaveLength(30);
+    expect(result.series[0].date).toBe('2026-09-01');
+    expect(result.series[29].date).toBe('2026-09-30');
+    expect(result.series.every((d) => d.bookings === 0 && d.revenueCents === 0)).toBe(true);
+  });
+
+  it('buckets bookings by UTC day and counts revenue for PAID bookings only', async () => {
+    const { service } = build([
+      { createdAt: new Date('2026-09-29T08:00:00Z'), amountCents: 1000, paymentStatus: 'PAID' },
+      { createdAt: new Date('2026-09-29T23:59:00Z'), amountCents: 500, paymentStatus: 'PAID' },
+      { createdAt: new Date('2026-09-29T12:00:00Z'), amountCents: 700, paymentStatus: 'PENDING' },
+      { createdAt: new Date('2026-09-30T00:00:00Z'), amountCents: null, paymentStatus: 'UNPAID' },
+    ]);
+
+    const result = await service.trends('s1', 30);
+
+    const day = (d: string) => result.series.find((r) => r.date === d)!;
+    expect(day('2026-09-29')).toEqual({ date: '2026-09-29', bookings: 3, revenueCents: 1500 });
+    expect(day('2026-09-30')).toEqual({ date: '2026-09-30', bookings: 1, revenueCents: 0 });
+  });
+
+  it('scopes to this space, excludes cancelled bookings, and only reads the window', async () => {
+    const { service, prisma } = build();
+
+    await service.trends('s1', 7);
+
+    const rowsWhere = prisma.booking.findMany.mock.calls[0][0].where;
+    expect(rowsWhere.spaceId).toBe('s1');
+    expect(rowsWhere.cancelledAt).toBeNull();
+    expect(rowsWhere.createdAt.gte).toEqual(new Date('2026-09-24T00:00:00.000Z'));
+    expect(prisma.booking.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { spaceId: 's1', cancelledAt: null } }),
+    );
+  });
+
+  it('reports the desk/room split, with 0 for a type that has no bookings', async () => {
+    const { service } = build([], [{ bookableType: 'DESK', _count: { _all: 7 } }]);
+
+    const result = await service.trends('s1');
+
+    expect(result.byType).toEqual({ desk: 7, room: 0 });
+  });
+
+  it('clamps the window to 7..90 days and falls back to 30 for garbage', async () => {
+    const { service } = build();
+
+    expect((await service.trends('s1', 3)).series).toHaveLength(7);
+    expect((await service.trends('s1', 500)).series).toHaveLength(90);
+    expect((await service.trends('s1', NaN)).series).toHaveLength(30);
+    expect((await service.trends('s1', 0)).series).toHaveLength(30);
+  });
+});
