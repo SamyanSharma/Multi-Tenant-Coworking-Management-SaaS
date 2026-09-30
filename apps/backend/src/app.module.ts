@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +20,15 @@ import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
+    // Global safety net: 120 requests/minute per client IP. The sensitive
+    // routes (login, signup) tighten this with @Throttle(); the Stripe
+    // webhook opts out with @SkipThrottle(). Skipped under Jest
+    // (NODE_ENV=test) so the e2e suite can fire many requests quickly; the
+    // dedicated throttle e2e spec switches it back on.
+    ThrottlerModule.forRoot({
+      throttlers: [{ ttl: 60_000, limit: 120 }],
+      skipIf: () => process.env.NODE_ENV === 'test',
+    }),
     PrismaModule,
     AuthModule,
     SpacesModule,
@@ -35,6 +45,12 @@ import { AdminModule } from './admin/admin.module';
   providers: [
     AppService,
     // Order matters: Nest runs global guards in registration order.
+    // ThrottlerGuard goes first so brute-force attempts are cut off before
+    // any token parsing or database work happens.
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
     // JwtAuthGuard MUST run before TenantGuard/RbacGuard, since both
     // of those read req.user, which only JwtAuthGuard sets.
     // RbacGuard is global and deny-by-default: every route needs either

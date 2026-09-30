@@ -8,6 +8,7 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import type Stripe from 'stripe';
 import { StripeService } from './stripe.service';
@@ -27,6 +28,11 @@ export class WebhookController {
   // Public: Stripe calls this directly with no JWT. Its
   // stripe-signature header (verified below) is the actual auth
   // mechanism here, not anything JwtAuthGuard checks.
+  //
+  // @SkipThrottle(): Stripe delivers (and retries) from a small set of IPs;
+  // rate limiting them would drop real payment events. The signature check
+  // below is what protects this route.
+  @SkipThrottle()
   @Public()
   @SkipTenantCheck()
   @HttpCode(200)
