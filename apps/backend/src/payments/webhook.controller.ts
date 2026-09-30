@@ -83,8 +83,19 @@ export class WebhookController {
           break;
         }
 
-        await this.prisma.booking.update({
-          where: { id: bookingId },
+        // Conditional transition, not a blind update. Stripe delivers
+        // events at-least-once and out of order, so the same
+        // payment_intent.succeeded can arrive twice, or after the booking
+        // has already moved on (refunded, cancelled because its desk was
+        // deleted). A blind update would rewrite paidAt on a replay and
+        // could drag a REFUNDED booking back to PAID. Only bookings that are
+        // still waiting for payment may become PAID, so a replay is a no-op.
+        const { count } = await this.prisma.booking.updateMany({
+          where: {
+            id: bookingId,
+            paymentStatus: { in: ['UNPAID', 'PENDING', 'FAILED'] },
+            cancelledAt: null,
+          },
           data: {
             paymentStatus: 'PAID',
             stripePaymentIntentId: paymentIntent.id,
@@ -94,7 +105,14 @@ export class WebhookController {
           },
         });
 
-        this.logger.log(`Booking ${bookingId} marked PAID`);
+        if (count === 0) {
+          this.logger.warn(
+            `payment_intent.succeeded (${paymentIntent.id}) ignored: booking ` +
+              `${bookingId} is missing, already paid/refunded, or cancelled`,
+          );
+        } else {
+          this.logger.log(`Booking ${bookingId} marked PAID`);
+        }
         break;
       }
 
@@ -103,14 +121,31 @@ export class WebhookController {
         const bookingId = paymentIntent.metadata?.bookingId;
 
         if (bookingId) {
-          await this.prisma.booking.update({
-            where: { id: bookingId },
+          // Only the PaymentIntent the booking is CURRENTLY waiting on may
+          // fail it (stripePaymentIntentId must match), and only from a
+          // not-yet-paid state. Otherwise a late failure event for an
+          // abandoned first attempt would flip a booking that was since
+          // retried (new PaymentIntent) or already paid back to FAILED.
+          const { count } = await this.prisma.booking.updateMany({
+            where: {
+              id: bookingId,
+              stripePaymentIntentId: paymentIntent.id,
+              paymentStatus: { in: ['UNPAID', 'PENDING'] },
+              cancelledAt: null,
+            },
             data: {
               paymentStatus: 'FAILED',
             },
           });
 
-          this.logger.log(`Booking ${bookingId} marked FAILED`);
+          if (count === 0) {
+            this.logger.warn(
+              `payment_intent.payment_failed (${paymentIntent.id}) ignored: ` +
+                `booking ${bookingId} is no longer waiting on this PaymentIntent`,
+            );
+          } else {
+            this.logger.log(`Booking ${bookingId} marked FAILED`);
+          }
         }
 
         break;
