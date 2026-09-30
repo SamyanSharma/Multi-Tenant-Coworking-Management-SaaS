@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
 import { LIVE } from '../common/live';
+import { computeCapacity } from '../common/capacity';
 import { AuthService } from '../auth/auth.service';
 
 export interface PublicSpace {
@@ -80,18 +81,38 @@ export class SpacesService {
   }
 
   async findOwnSpace(spaceId: string) {
-  const space = await this.prisma.space.findUnique({
-    where: { id: spaceId },
-  });
+    const space = await this.prisma.space.findUnique({
+      where: { id: spaceId },
+    });
 
-  if (!space) {
-    throw new NotFoundException('Space not found');
+    if (!space) {
+      throw new NotFoundException('Space not found');
+    }
+
+    // Desks/rooms have no spaceId of their own; they belong to a space
+    // through their zone. LIVE on the row itself is enough because deleting
+    // a parent soft-deletes its whole subtree (see common/live.ts).
+    const inThisSpace = { ...LIVE, zone: { spaceId } };
+    const [desks, roomAgg] = await Promise.all([
+      this.prisma.desk.count({ where: inThisSpace }),
+      this.prisma.room.aggregate({
+        where: inThisSpace,
+        _count: { _all: true },
+        _sum: { capacity: true },
+      }),
+    ]);
+
+    return {
+      ...space,
+      counts: {
+        desks,
+        rooms: roomAgg._count._all,
+        capacity: computeCapacity(desks, roomAgg._sum.capacity ?? 0),
+      },
+    };
   }
 
-  return space;
-}
-
-async updatePrice(spaceId: string, priceCents: number) {
+  async updatePrice(spaceId: string, priceCents: number) {
   const space = await this.prisma.space.findUnique({
     where: { id: spaceId },
   });

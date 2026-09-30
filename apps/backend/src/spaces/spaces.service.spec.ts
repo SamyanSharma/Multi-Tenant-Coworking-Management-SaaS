@@ -4,6 +4,9 @@ import { SpacesService } from './spaces.service';
 function build(over: Record<string, any> = {}) {
   const prisma: any = {
     space: {
+      findUnique: jest.fn().mockResolvedValue(
+        over.ownSpace === undefined ? { id: 's1', name: 'Alpha', slug: 'alpha' } : over.ownSpace,
+      ),
       findMany: jest.fn().mockResolvedValue(
         over.spaces ?? [
           { id: 's1', name: 'Alpha', priceCents: 1500, createdAt: new Date('2026-09-01') },
@@ -27,6 +30,12 @@ function build(over: Record<string, any> = {}) {
       ),
       update: jest.fn().mockImplementation(({ data }) =>
         Promise.resolve({ id: 'user-1', role: 'MEMBER', ...data }),
+      ),
+    },
+    desk: { count: jest.fn().mockResolvedValue(over.deskCount ?? 1) },
+    room: {
+      aggregate: jest.fn().mockResolvedValue(
+        over.roomAgg ?? { _count: { _all: 1 }, _sum: { capacity: 4 } },
       ),
     },
     zone: {
@@ -143,5 +152,44 @@ describe('SpacesService.join', () => {
 
     await expect(service.join('user-1', 'closed-space')).rejects.toThrow(NotFoundException);
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('SpacesService.findOwnSpace counts', () => {
+  it('reports desks, rooms and capacity = desks + room capacity (1 desk + a 4-seat room = 5)', async () => {
+    const { service } = build();
+
+    const result: any = await service.findOwnSpace('s1');
+
+    expect(result.id).toBe('s1');
+    expect(result.counts).toEqual({ desks: 1, rooms: 1, capacity: 5 });
+  });
+
+  it('scopes both queries to this space through the zone and to live rows only', async () => {
+    const { service, prisma } = build();
+
+    await service.findOwnSpace('s1');
+
+    const where = { deletedAt: null, zone: { spaceId: 's1' } };
+    expect(prisma.desk.count).toHaveBeenCalledWith({ where });
+    expect(prisma.room.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where }));
+  });
+
+  it('is all zeros for a space with no desks or rooms (null room sum)', async () => {
+    const { service } = build({
+      deskCount: 0,
+      roomAgg: { _count: { _all: 0 }, _sum: { capacity: null } },
+    });
+
+    const result: any = await service.findOwnSpace('s1');
+
+    expect(result.counts).toEqual({ desks: 0, rooms: 0, capacity: 0 });
+  });
+
+  it('throws NotFound (and runs no count queries) for an unknown space', async () => {
+    const { service, prisma } = build({ ownSpace: null });
+
+    await expect(service.findOwnSpace('nope')).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.desk.count).not.toHaveBeenCalled();
   });
 });
