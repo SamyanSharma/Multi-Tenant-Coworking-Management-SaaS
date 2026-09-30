@@ -30,7 +30,10 @@ export class ZonesController {
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
-    return this.zonesService.findAllForSpace(requireSpaceId(req));
+    return this.zonesService.findAllForSpace(
+      requireSpaceId(req),
+      req.user?.role === Role.MEMBER,
+    );
   }
 
   @UseGuards(RbacGuard)
@@ -40,7 +43,11 @@ export class ZonesController {
     @Param('id') id: string,
     @Req() req: Request,
   ) {
-    return this.zonesService.findOne(id, requireSpaceId(req));
+    return this.zonesService.findOne(
+      id,
+      requireSpaceId(req),
+      req.user?.role === Role.MEMBER,
+    );
   }
 
   @UseGuards(RbacGuard)

@@ -47,7 +47,7 @@ export class SpacesService {
         _count: { _all: true },
       }),
       this.prisma.zone.findMany({
-        where: LIVE,
+        where: { ...LIVE, isActive: true },
         select: {
           spaceId: true,
           _count: { select: { desks: { where: LIVE }, rooms: { where: LIVE } } },
@@ -80,7 +80,9 @@ export class SpacesService {
       .map(({ createdAt: _createdAt, ...rest }) => rest);
   }
 
-  async findOwnSpace(spaceId: string) {
+  // `activeOnly` is true for Members: totals then cover only zones they can
+  // actually see and book. Managers see the full inventory.
+  async findOwnSpace(spaceId: string, activeOnly = false) {
     const space = await this.prisma.space.findUnique({
       where: { id: spaceId },
     });
@@ -92,7 +94,10 @@ export class SpacesService {
     // Desks/rooms have no spaceId of their own; they belong to a space
     // through their zone. LIVE on the row itself is enough because deleting
     // a parent soft-deletes its whole subtree (see common/live.ts).
-    const inThisSpace = { ...LIVE, zone: { spaceId } };
+    const inThisSpace = {
+      ...LIVE,
+      zone: { spaceId, ...(activeOnly && { isActive: true }) },
+    };
     const [desks, roomAgg] = await Promise.all([
       this.prisma.desk.count({ where: inThisSpace }),
       this.prisma.room.aggregate({

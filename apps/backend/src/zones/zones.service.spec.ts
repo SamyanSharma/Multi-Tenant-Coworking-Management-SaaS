@@ -74,3 +74,48 @@ describe('ZonesService.update', () => {
     await expect(service.update('z1', { isActive: false }, 's1')).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('ZonesService — inactive zones are hidden from Members', () => {
+  function buildReads(zone: any) {
+    const prisma: any = {
+      zone: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(zone),
+      },
+    };
+    return { service: new ZonesService(prisma), prisma };
+  }
+  const inactive = { id: 'z1', spaceId: 's1', name: 'Quiet', isActive: false, deletedAt: null, desks: [], rooms: [] };
+
+  it('list: a Member only gets active zones', async () => {
+    const { service, prisma } = buildReads(inactive);
+
+    await service.findAllForSpace('s1', true);
+
+    expect(prisma.zone.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { spaceId: 's1', deletedAt: null, isActive: true } }),
+    );
+  });
+
+  it('list: a manager still gets inactive zones (so they can switch them back on)', async () => {
+    const { service, prisma } = buildReads(inactive);
+
+    await service.findAllForSpace('s1');
+
+    expect(prisma.zone.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { spaceId: 's1', deletedAt: null } }),
+    );
+  });
+
+  it('get by id: 404 for a Member, even with the exact id', async () => {
+    const { service } = buildReads(inactive);
+
+    await expect(service.findOne('z1', 's1', true)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('get by id: a manager can still open an inactive zone', async () => {
+    const { service } = buildReads(inactive);
+
+    await expect(service.findOne('z1', 's1')).resolves.toMatchObject({ id: 'z1' });
+  });
+});

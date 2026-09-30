@@ -30,14 +30,21 @@ export class DesksController {
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get()
   findAll(@Req() req: Request) {
-    return this.desksService.findAllForSpace(requireSpaceId(req));
+    return this.desksService.findAllForSpace(
+      requireSpaceId(req),
+      req.user?.role === Role.MEMBER,
+    );
   }
 
   @UseGuards(RbacGuard)
   @Roles(Role.SPACE_MANAGER, Role.MEMBER)
   @Get(':id')
   findOne(@Param('id') id: string, @Req() req: Request) {
-    return this.desksService.findOne(id, requireSpaceId(req));
+    return this.desksService.findOne(
+      id,
+      requireSpaceId(req),
+      req.user?.role === Role.MEMBER,
+    );
   }
 
   @UseGuards(RbacGuard)

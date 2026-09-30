@@ -15,18 +15,27 @@ export class DesksService {
 
   // Desk has no spaceId column — filter through the relation:
   // "desks whose zone belongs to this space".
-  findAllForSpace(spaceId: string) {
+  // `activeOnly` is true for Members: desks in an inactive zone are hidden.
+  findAllForSpace(spaceId: string, activeOnly = false) {
     return this.prisma.desk.findMany({
-      where: { ...LIVE, zone: { spaceId } },
+      where: {
+        ...LIVE,
+        zone: { spaceId, ...(activeOnly && { isActive: true }) },
+      },
     });
   }
 
-  async findOne(id: string, spaceId: string) {
+  async findOne(id: string, spaceId: string, activeOnly = false) {
     const desk = await this.prisma.desk.findUnique({
       where: { id },
       include: { zone: true },
     });
-    if (!desk || desk.deletedAt || desk.zone.spaceId !== spaceId) {
+    if (
+      !desk ||
+      desk.deletedAt ||
+      desk.zone.spaceId !== spaceId ||
+      (activeOnly && !desk.zone.isActive)
+    ) {
       // 404 rather than 403: doesn't confirm to the caller that a desk
       // with this id exists at all in a DIFFERENT tenant.
       throw new NotFoundException('Desk not found in this space');

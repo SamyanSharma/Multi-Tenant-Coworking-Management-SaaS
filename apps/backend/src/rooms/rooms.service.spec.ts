@@ -88,3 +88,35 @@ describe('RoomsService.update — rate invariant', () => {
     ).rejects.toThrow(BadRequestException);
   });
 });
+
+describe('RoomsService — inactive zones are hidden from Members', () => {
+  const inactiveRoom = {
+    id: 'room-1',
+    name: 'Conference Room A',
+    deletedAt: null,
+    zone: { id: 'zone-1', spaceId: 'space-1', isActive: false },
+  };
+
+  it('list: a Member\'s query is restricted to active zones', async () => {
+    const { service, prisma } = build();
+    prisma.room.findMany = jest.fn().mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1', true);
+
+    expect(prisma.room.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: null, zone: { spaceId: 'space-1', isActive: true } },
+    });
+  });
+
+  it('get by id: 404 for a Member when the room\'s zone is inactive', async () => {
+    const { service } = build({ room: inactiveRoom });
+
+    await expect(service.findOne('room-1', 'space-1', true)).rejects.toThrow('Room not found in this space');
+  });
+
+  it('get by id: a manager can still read it', async () => {
+    const { service } = build({ room: inactiveRoom });
+
+    await expect(service.findOne('room-1', 'space-1')).resolves.toMatchObject({ id: 'room-1' });
+  });
+});

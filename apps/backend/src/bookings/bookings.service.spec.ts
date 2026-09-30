@@ -884,3 +884,46 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
     );
   });
 });
+
+describe('BookingsService.create — inactive zone', () => {
+  const dto = {
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime: FUTURE_START,
+    endTime: FUTURE_END,
+  };
+
+  it('refuses a new booking in an inactive zone, before any hold, booking row or Stripe call', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1',
+      name: 'Desk A1',
+      zone: { spaceId: 'space-1', isActive: false },
+    });
+
+    await expect(service.create(dto, 'space-1', 'user-1')).rejects.toThrow(
+      'This zone is currently inactive and cannot be booked',
+    );
+
+    expect(prisma.booking.create).not.toHaveBeenCalled();
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+    expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('still books normally in an active zone', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1',
+      name: 'Desk A1',
+      zone: { spaceId: 'space-1', isActive: true },
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-1', amountCents: 1000, paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_123',
+    });
+
+    const result = await service.create(dto, 'space-1', 'user-1');
+
+    expect(result.paymentStatus).toBe('PENDING');
+  });
+});

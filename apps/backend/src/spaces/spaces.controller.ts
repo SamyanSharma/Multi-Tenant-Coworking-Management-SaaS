@@ -44,7 +44,10 @@ export class SpacesController {
 
   @Get('me')
   findOwn(@Req() req: Request) {
-    return this.spacesService.findOwnSpace(requireSpaceId(req));
+    return this.spacesService.findOwnSpace(
+      requireSpaceId(req),
+      req.user?.role === Role.MEMBER,
+    );
   }
 
 
@@ -57,7 +60,7 @@ export class SpacesController {
       return this.spacesService.findOwnSpace('__invalid_space__');
     }
 
-    return this.spacesService.findOwnSpace(id);
+    return this.spacesService.findOwnSpace(id, req.user?.role === Role.MEMBER);
   }
 
   @UseGuards(RbacGuard)

@@ -8,13 +8,15 @@ import { LIVE } from '../common/live';
 export class ZonesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAllForSpace(spaceId: string) {
+  // `activeOnly` is true for Members: an inactive zone is hidden from them
+  // entirely. Managers always see every live zone (they need to reactivate).
+  findAllForSpace(spaceId: string, activeOnly = false) {
     return this.prisma.zone.findMany({
-      where: { spaceId, ...LIVE },
+      where: { spaceId, ...LIVE, ...(activeOnly && { isActive: true }) },
     });
   }
 
-  async findOne(id: string, spaceId: string) {
+  async findOne(id: string, spaceId: string, activeOnly = false) {
     const zone = await this.prisma.zone.findUnique({
       where: { id },
       include: {
@@ -23,7 +25,12 @@ export class ZonesService {
       },
     });
 
-    if (!zone || zone.deletedAt || zone.spaceId !== spaceId) {
+    if (
+      !zone ||
+      zone.deletedAt ||
+      zone.spaceId !== spaceId ||
+      (activeOnly && !zone.isActive)
+    ) {
       throw new NotFoundException('Zone not found in this space');
     }
 

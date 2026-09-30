@@ -136,3 +136,44 @@ describe('DesksService.update — rate invariant', () => {
     ).rejects.toThrow(BadRequestException);
   });
 });
+
+describe('DesksService — inactive zones are hidden from Members', () => {
+  const inactiveDesk = {
+    id: 'desk-1',
+    name: 'Desk A1',
+    deletedAt: null,
+    zone: { id: 'zone-1', spaceId: 'space-1', isActive: false },
+  };
+
+  it('list: a Member\'s query is restricted to active zones', async () => {
+    const { service, prisma } = build();
+
+    await service.findAllForSpace('space-1', true);
+
+    expect(prisma.desk.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: null, zone: { spaceId: 'space-1', isActive: true } },
+    });
+  });
+
+  it('list: a manager\'s query is not restricted', async () => {
+    const { service, prisma } = build();
+
+    await service.findAllForSpace('space-1');
+
+    expect(prisma.desk.findMany).toHaveBeenCalledWith({
+      where: { deletedAt: null, zone: { spaceId: 'space-1' } },
+    });
+  });
+
+  it('get by id: 404 for a Member when the desk\'s zone is inactive', async () => {
+    const { service } = build({ desk: inactiveDesk });
+
+    await expect(service.findOne('desk-1', 'space-1', true)).rejects.toThrow('Desk not found in this space');
+  });
+
+  it('get by id: a manager can still read it', async () => {
+    const { service } = build({ desk: inactiveDesk });
+
+    await expect(service.findOne('desk-1', 'space-1')).resolves.toMatchObject({ id: 'desk-1' });
+  });
+});

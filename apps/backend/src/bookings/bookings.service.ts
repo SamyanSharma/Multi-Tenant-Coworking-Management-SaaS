@@ -414,6 +414,16 @@ export class BookingsService {
       spaceId,
     );
 
+    // Zone switched off by the manager: refuse NEW bookings. Strict
+    // `=== false` on purpose. Existing bookings, and retryPayment for a
+    // hold someone already has, are deliberately left alone: the customer
+    // already committed before the zone was switched off.
+    if (bookable.zone.isActive === false) {
+      throw new BadRequestException(
+        'This zone is currently inactive and cannot be booked',
+      );
+    }
+
 
     const space =
       await this.prisma.space.findUnique({

@@ -65,8 +65,9 @@ describe('SpacesService.findPublic', () => {
     expect(prisma.space.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { deletedAt: null } }),
     );
+    // Zones also have to be active to count toward the advertised size.
     expect(prisma.zone.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { deletedAt: null } }),
+      expect.objectContaining({ where: { deletedAt: null, isActive: true } }),
     );
   });
 
@@ -191,5 +192,27 @@ describe('SpacesService.findOwnSpace counts', () => {
 
     await expect(service.findOwnSpace('nope')).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.desk.count).not.toHaveBeenCalled();
+  });
+});
+
+describe('SpacesService.findOwnSpace — inactive zones', () => {
+  it('a Member\'s totals only cover active zones', async () => {
+    const { service, prisma } = build();
+
+    await service.findOwnSpace('s1', true);
+
+    const where = { deletedAt: null, zone: { spaceId: 's1', isActive: true } };
+    expect(prisma.desk.count).toHaveBeenCalledWith({ where });
+    expect(prisma.room.aggregate).toHaveBeenCalledWith(expect.objectContaining({ where }));
+  });
+
+  it('a manager\'s totals still cover the whole inventory, inactive zones included', async () => {
+    const { service, prisma } = build();
+
+    await service.findOwnSpace('s1');
+
+    expect(prisma.desk.count).toHaveBeenCalledWith({
+      where: { deletedAt: null, zone: { spaceId: 's1' } },
+    });
   });
 });

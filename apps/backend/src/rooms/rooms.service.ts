@@ -13,18 +13,27 @@ import { LIVE } from '../common/live';
 export class RoomsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAllForSpace(spaceId: string) {
+  // `activeOnly` is true for Members: rooms in an inactive zone are hidden.
+  findAllForSpace(spaceId: string, activeOnly = false) {
     return this.prisma.room.findMany({
-      where: { ...LIVE, zone: { spaceId } },
+      where: {
+        ...LIVE,
+        zone: { spaceId, ...(activeOnly && { isActive: true }) },
+      },
     });
   }
 
-  async findOne(id: string, spaceId: string) {
+  async findOne(id: string, spaceId: string, activeOnly = false) {
     const room = await this.prisma.room.findUnique({
       where: { id },
       include: { zone: true },
     });
-    if (!room || room.deletedAt || room.zone.spaceId !== spaceId) {
+    if (
+      !room ||
+      room.deletedAt ||
+      room.zone.spaceId !== spaceId ||
+      (activeOnly && !room.zone.isActive)
+    ) {
       throw new NotFoundException('Room not found in this space');
     }
     return room;
