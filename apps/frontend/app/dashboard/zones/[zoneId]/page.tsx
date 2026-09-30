@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
+import { computeCapacity } from '@/lib/capacity';
 import ZoneForm from './ZoneForm';
 import DeskForm from './DeskForm';
 import RoomForm from './RoomForm';
@@ -195,7 +196,7 @@ export default function ZoneDetailPage() {
   const canManage = role === 'SPACE_MANAGER' || role === 'PLATFORM_ADMIN';
   // Only Space Managers can rename/delete (the API is SPACE_MANAGER-only).
   const isManager = role === 'SPACE_MANAGER';
-  const totalCapacity = rooms.reduce((sum, room) => sum + room.capacity, 0);
+  const totalCapacity = computeCapacity(desks.length, rooms.map((r) => r.capacity));
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
