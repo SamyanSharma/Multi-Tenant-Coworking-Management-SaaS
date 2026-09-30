@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
+import AnalyticsCharts from '@/components/AnalyticsCharts';
+import type { Trends } from '@/lib/analyticsTrends';
 import { 
   DollarSign, 
   CalendarCheck, 
@@ -67,6 +69,7 @@ function formatTrend(pct: number | null): {
 export default function AnalyticsPage() {
   const role = useAuthStore((s) => s.role);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [trends, setTrends] = useState<Trends | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -78,10 +81,13 @@ export default function AnalyticsPage() {
     setError(null);
     
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/summary`, {
-        headers: getAuthHeaders(),
-        cache: 'no-store'
-      });
+      const opts = { headers: getAuthHeaders(), cache: 'no-store' as const };
+      const [res, trendsRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/summary`, opts),
+        // The charts are an extra: if this call fails the numbers above
+        // still load, so it must never reject the whole Promise.all.
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/trends?days=30`, opts).catch(() => null),
+      ]);
       
       if (!res.ok) {
         throw new Error(`Failed to load analytics (${res.status})`);
@@ -89,6 +95,7 @@ export default function AnalyticsPage() {
       
       const data = await res.json();
       setSummary(data);
+      setTrends(trendsRes && trendsRes.ok ? await trendsRes.json() : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -302,6 +309,12 @@ export default function AnalyticsPage() {
           );
         })}
       </div>
+
+      {trends ? (
+        <AnalyticsCharts trends={trends} />
+      ) : (
+        <p className="text-sm text-slate-400">Charts are unavailable right now.</p>
+      )}
 
       {isAdmin && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
