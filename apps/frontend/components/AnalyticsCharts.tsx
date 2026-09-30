@@ -15,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import ChartCard from './ChartCard';
 import {
   hasBookings,
   hasRevenue,
@@ -28,32 +29,6 @@ const usd = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
 });
-
-function ChartCard({
-  title,
-  subtitle,
-  empty,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  empty: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-      <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-      <p className="text-xs text-slate-500 mb-4">{subtitle}</p>
-      {empty ? (
-        <div className="h-64 flex items-center justify-center text-sm text-slate-400">
-          No data yet
-        </div>
-      ) : (
-        <div className="h-64">{children}</div>
-      )}
-    </div>
-  );
-}
 
 const PIE_COLORS = ['#2563eb', '#f59e0b'];
 

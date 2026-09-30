@@ -20,16 +20,20 @@ export interface ChartPoint {
   revenue: number; // dollars
 }
 
+// 'Sep 12' for a 'YYYY-MM-DD' UTC day. Parsed and formatted as UTC so the
+// label never slips a day in a timezone behind/ahead of the server's buckets.
+export function dayLabel(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function toChartSeries(series: TrendPoint[]): ChartPoint[] {
   return series.map((p) => ({
     date: p.date,
-    // Parse and format as UTC so the label never slips a day in a
-    // timezone behind/ahead of the server's UTC bucketing.
-    label: new Date(`${p.date}T00:00:00Z`).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC',
-    }),
+    label: dayLabel(p.date),
     bookings: p.bookings,
     revenue: p.revenueCents / 100,
   }));
