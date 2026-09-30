@@ -19,6 +19,16 @@ export class AdminController {
     return this.adminService.overview();
   }
 
+  // Chart data across all tenants. ?days=30 (clamped to 7..90 in the
+  // service; anything unparsable = 30).
+  @UseGuards(RbacGuard)
+  @Roles(Role.PLATFORM_ADMIN)
+  @SkipTenantCheck()
+  @Get('trends')
+  trends(@Query('days') days?: string) {
+    return this.adminService.trends(days === undefined ? undefined : Number(days));
+  }
+
   // The "click into a space" drill-down (name, manager, live
   // zone/desk/room counts, revenue). :id is any space's id, not the
   // caller's own — unlike every other :id route in this app, which is

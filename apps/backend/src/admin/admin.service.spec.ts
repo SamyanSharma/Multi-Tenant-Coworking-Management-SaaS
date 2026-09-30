@@ -291,3 +291,96 @@ describe('AdminService.getSpaceMembers', () => {
     expect(members).toEqual([{ id: 'u1', name: 'Bob', email: 'bob@acme.test', createdAt: daysAgo(1) }]);
   });
 });
+
+describe('AdminService.trends', () => {
+  const TODAY = new Date('2026-09-30T10:00:00.000Z');
+
+  function buildTrends(over: {
+    paid?: any[];
+    spaces?: any[];
+    members?: any[];
+    spacesBefore?: number;
+    membersBefore?: number;
+  } = {}) {
+    // The three raw queries are told apart by the table they read from.
+    const prisma: any = {
+      $queryRaw: jest.fn((q: any) => {
+        const text: string = q.text;
+        if (text.includes('"Booking"')) return Promise.resolve(over.paid ?? []);
+        if (text.includes('"Space"')) return Promise.resolve(over.spaces ?? []);
+        if (text.includes('"User"')) return Promise.resolve(over.members ?? []);
+        throw new Error('unexpected query: ' + text);
+      }),
+      space: { count: jest.fn().mockResolvedValue(over.spacesBefore ?? 0) },
+      user: { count: jest.fn().mockResolvedValue(over.membersBefore ?? 0) },
+    };
+    return { service: new AdminService(prisma), prisma };
+  }
+
+  it('returns one zero-filled row per UTC day ending today, oldest first', async () => {
+    const { service } = buildTrends();
+
+    const result = await service.trends(30, TODAY);
+
+    expect(result.days).toBe(30);
+    expect(result.series).toHaveLength(30);
+    expect(result.series[0].date).toBe('2026-09-01');
+    expect(result.series[29].date).toBe('2026-09-30');
+    expect(result.series.every((d) => d.netCents === 0 && d.paidBookings === 0 && d.newSpaces === 0 && d.newMembers === 0)).toBe(true);
+  });
+
+  it('merges each query into the right day and field', async () => {
+    const { service } = buildTrends({
+      paid: [{ day: '2026-09-29', net: 4500, n: 3 }],
+      spaces: [{ day: '2026-09-15', n: 1 }],
+      members: [{ day: '2026-09-15', n: 2 }, { day: '2026-09-30', n: 1 }],
+    });
+
+    const result = await service.trends(30, TODAY);
+    const day = (d: string) => result.series.find((r) => r.date === d)!;
+
+    expect(day('2026-09-29')).toEqual({ date: '2026-09-29', netCents: 4500, paidBookings: 3, newSpaces: 0, newMembers: 0 });
+    expect(day('2026-09-15')).toMatchObject({ newSpaces: 1, newMembers: 2, netCents: 0 });
+    expect(day('2026-09-30').newMembers).toBe(1);
+  });
+
+  it('ignores rows outside the window instead of crashing', async () => {
+    const { service } = buildTrends({ paid: [{ day: '2020-01-01', net: 999, n: 9 }] });
+
+    const result = await service.trends(30, TODAY);
+
+    expect(result.series.reduce((a, d) => a + d.netCents, 0)).toBe(0);
+  });
+
+  it('reports baseline totals from before the window (counted, not fetched)', async () => {
+    const { service, prisma } = buildTrends({ spacesBefore: 4, membersBefore: 11 });
+
+    const result = await service.trends(7, TODAY);
+
+    expect(result.baseline).toEqual({ spaces: 4, members: 11 });
+    const start = new Date('2026-09-24T00:00:00.000Z');
+    expect(prisma.space.count).toHaveBeenCalledWith({ where: { createdAt: { lt: start } } });
+    expect(prisma.user.count).toHaveBeenCalledWith({ where: { role: 'MEMBER', createdAt: { lt: start } } });
+  });
+
+  it('only counts PAID bookings and MEMBER accounts, and passes the window start as a parameter', async () => {
+    const { service, prisma } = buildTrends();
+
+    await service.trends(7, TODAY);
+
+    const queries = prisma.$queryRaw.mock.calls.map((c: any[]) => c[0]);
+    const booking = queries.find((q: any) => q.text.includes('"Booking"'));
+    const user = queries.find((q: any) => q.text.includes('"User"'));
+    expect(booking.text).toContain(`"paymentStatus" = 'PAID'`);
+    expect(user.text).toContain(`"role" = 'MEMBER'`);
+    expect(booking.values).toEqual(['2026-09-24T00:00:00.000Z']);
+  });
+
+  it('clamps the window to 7..90 days and falls back to 30 for garbage', async () => {
+    const { service } = buildTrends();
+
+    expect((await service.trends(2, TODAY)).series).toHaveLength(7);
+    expect((await service.trends(1000, TODAY)).series).toHaveLength(90);
+    expect((await service.trends(NaN, TODAY)).series).toHaveLength(30);
+  });
+});

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LIVE } from '../common/live';
 
@@ -55,6 +56,22 @@ export interface SpaceDetail {
     last30d: { netCents: number; bookings: number };
   };
   zones: Array<{ id: string; name: string; desks: number; rooms: number }>;
+}
+
+export interface AdminTrendPoint {
+  date: string; // 'YYYY-MM-DD', a UTC day
+  netCents: number; // PAID bookings paid that day
+  paidBookings: number;
+  newSpaces: number;
+  newMembers: number;
+}
+
+export interface AdminTrends {
+  days: number;
+  series: AdminTrendPoint[];
+  // Totals that existed BEFORE the first day of the window, so the frontend
+  // can turn the per-day "new" counts into a cumulative growth line.
+  baseline: { spaces: number; members: number };
 }
 
 export interface AdminBookingRow {
@@ -281,6 +298,72 @@ export class AdminService {
   // finding A-06) — the last thing an admin browsing spaces should
   // trigger. This mirrors overview()'s own pattern instead: pure
   // database aggregates, scoped to one spaceId via `where`.
+  // Cross-tenant time series for the Platform Admin charts: per UTC day over
+  // the last `days` days (zero-filled). Day-bucketing can't be expressed with
+  // Prisma's groupBy, so it is a small raw SQL GROUP BY, i.e. still
+  // aggregated in the database, never by fetching rows into JS.
+  //
+  // Definitions match overview(): revenue = PAID bookings only, dated by
+  // paidAt (a refunded booking leaves PAID and so leaves its day: refunded
+  // money is not revenue). "Members" are all MEMBER accounts ever created
+  // and "spaces" all spaces ever created (closed ones included), so these
+  // are growth-of-signups numbers, not the "live" totals on the KPI cards.
+  // All casts to ::int are deliberate: COUNT/SUM are bigint in Postgres and
+  // a BigInt cannot be JSON-serialised.
+  async trends(days = 30, now: Date = new Date()): Promise<AdminTrends> {
+    const window = Math.min(Math.max(Math.trunc(days) || 30, 7), 90);
+    const start = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - (window - 1)),
+    );
+    // Timestamp columns are stored as UTC-naive; casting the ISO string with
+    // ::timestamp drops the 'Z' and keeps the same wall-clock value.
+    const startTs = start.toISOString();
+
+    type DayRow = { day: string; n: number; net?: number };
+
+    const [paidRows, spaceRows, memberRows, spacesBefore, membersBefore] =
+      await Promise.all([
+        this.prisma.$queryRaw<DayRow[]>(Prisma.sql`
+          SELECT to_char("paidAt", 'YYYY-MM-DD') AS day,
+                 COALESCE(SUM("amountCents"), 0)::int AS net,
+                 COUNT(*)::int AS n
+          FROM "Booking"
+          WHERE "paymentStatus" = 'PAID' AND "paidAt" >= ${startTs}::timestamp
+          GROUP BY 1`),
+        this.prisma.$queryRaw<DayRow[]>(Prisma.sql`
+          SELECT to_char("createdAt", 'YYYY-MM-DD') AS day, COUNT(*)::int AS n
+          FROM "Space"
+          WHERE "createdAt" >= ${startTs}::timestamp
+          GROUP BY 1`),
+        this.prisma.$queryRaw<DayRow[]>(Prisma.sql`
+          SELECT to_char("createdAt", 'YYYY-MM-DD') AS day, COUNT(*)::int AS n
+          FROM "User"
+          WHERE "role" = 'MEMBER' AND "createdAt" >= ${startTs}::timestamp
+          GROUP BY 1`),
+        this.prisma.space.count({ where: { createdAt: { lt: start } } }),
+        this.prisma.user.count({ where: { role: 'MEMBER', createdAt: { lt: start } } }),
+      ]);
+
+    const byDay = (rows: DayRow[]) => new Map(rows.map((r) => [r.day, r]));
+    const paid = byDay(paidRows);
+    const spaces = byDay(spaceRows);
+    const members = byDay(memberRows);
+
+    const series: AdminTrendPoint[] = [];
+    for (let i = 0; i < window; i++) {
+      const date = new Date(start.getTime() + i * DAY_MS).toISOString().slice(0, 10);
+      series.push({
+        date,
+        netCents: paid.get(date)?.net ?? 0,
+        paidBookings: paid.get(date)?.n ?? 0,
+        newSpaces: spaces.get(date)?.n ?? 0,
+        newMembers: members.get(date)?.n ?? 0,
+      });
+    }
+
+    return { days: window, series, baseline: { spaces: spacesBefore, members: membersBefore } };
+  }
+
   async getSpaceDetail(spaceId: string, now: Date = new Date()): Promise<SpaceDetail> {
     const space = await this.prisma.space.findUnique({ where: { id: spaceId } });
     if (!space) {
