@@ -81,6 +81,13 @@ model Zone {
   // has a deleted ancestor.
   deletedAt DateTime?
 
+  // A manager can switch a zone off temporarily without deleting it.
+  // Deliberately independent of deletedAt: "inactive" is reversible and keeps
+  // the zone (and its bookings history) visible to the manager; "deleted" is
+  // the Stage 9 soft delete. What inactive means for bookings is decided in
+  // BookingsService, not here.
+  isActive Boolean @default(true)
+
   desks Desk[]
   rooms Room[]
 

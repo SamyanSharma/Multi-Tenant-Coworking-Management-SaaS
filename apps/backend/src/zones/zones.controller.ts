@@ -13,6 +13,7 @@ import {
 import type { Request } from 'express';
 import { ZonesService } from './zones.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
+import { UpdateZoneDto } from './dto/update-zone.dto';
 import { RbacGuard } from '../auth/rbac.guard';
 import { Roles, Role } from '../auth/roles.decorator';
 import { DeletionService } from '../deletion/deletion.service';
@@ -60,7 +61,7 @@ export class ZonesController {
   @Patch(':id')
   update(
     @Param('id') id: string,
-    @Body() dto: CreateZoneDto,
+    @Body() dto: UpdateZoneDto,
     @Req() req: Request,
   ) {
     return this.zonesService.update(

@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateZoneDto } from './dto/create-zone.dto';
+import { UpdateZoneDto } from './dto/update-zone.dto';
 import { LIVE } from '../common/live';
 
 @Injectable()
@@ -40,9 +41,13 @@ export class ZonesService {
 
   async update(
     id: string,
-    dto: CreateZoneDto,
+    dto: UpdateZoneDto,
     spaceId: string,
   ) {
+    if (dto.name === undefined && dto.isActive === undefined) {
+      throw new BadRequestException('Nothing to update: send name and/or isActive');
+    }
+
     const zone = await this.prisma.zone.findUnique({
       where: { id },
     });
@@ -54,7 +59,8 @@ export class ZonesService {
     return this.prisma.zone.update({
       where: { id },
       data: {
-        name: dto.name,
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
       },
       include: {
         desks: { where: LIVE },
