@@ -35,6 +35,8 @@ interface Desk {
   id: string;
   name: string;
   zoneId: string;
+  hourlyRateCents?: number | null;
+  dailyRateCents?: number | null;
 }
 
 interface Room {
@@ -42,6 +44,8 @@ interface Room {
   name: string;
   capacity: number;
   zoneId: string;
+  hourlyRateCents?: number | null;
+  dailyRateCents?: number | null;
 }
 
 interface ZoneDetail {

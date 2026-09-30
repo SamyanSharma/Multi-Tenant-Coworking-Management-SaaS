@@ -11,6 +11,7 @@ import {
   Armchair,
 } from 'lucide-react';
 import { getAuthHeaders } from '@/lib/api';
+import { formatRates } from '@/lib/money';
 import { useAuthStore } from '@/store/authStore';
 import { useLiveBookingsStore } from '@/store/liveBookingsStore';
 import {
@@ -24,12 +25,16 @@ interface Desk {
   id: string;
   name: string;
   zoneId: string;
+  hourlyRateCents?: number | null;
+  dailyRateCents?: number | null;
 }
 interface Room {
   id: string;
   name: string;
   capacity: number;
   zoneId: string;
+  hourlyRateCents?: number | null;
+  dailyRateCents?: number | null;
 }
 
 export type FloorPlanKind = 'desk' | 'room';
@@ -189,6 +194,9 @@ function DeskTile({
         </div>
       </div>
       <p className={`mt-2 text-[11px] ${tone.sub}`}>{t.detail}</p>
+      <p data-testid={`rates-${desk.id}`} className="mt-1 text-[11px] font-semibold text-slate-700">
+        {formatRates(desk.hourlyRateCents, desk.dailyRateCents)}
+      </p>
       {canBook && <BookLink href={`/dashboard/book/desk/${desk.id}`} name={desk.name} />}
     </div>
   );
@@ -249,6 +257,10 @@ function RoomBlock({
           {room.capacity} {room.capacity === 1 ? 'seat' : 'seats'}
         </span>
       </div>
+
+      <p data-testid={`rates-${room.id}`} className="mt-2 text-xs font-semibold text-slate-700">
+        {formatRates(room.hourlyRateCents, room.dailyRateCents)}
+      </p>
 
       {canBook && <BookLink href={`/dashboard/book/room/${room.id}`} name={room.name} />}
     </div>
