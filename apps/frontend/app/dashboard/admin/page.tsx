@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import { getAuthHeaders } from '@/lib/api';
 import { formatCents, formatChangePct } from '@/lib/money';
+import AdminCharts from '@/components/AdminCharts';
+import type { AdminTrends } from '@/lib/adminTrends';
 import {
   AdminOverview,
   filterSpaces,
@@ -56,6 +58,7 @@ function KpiCard({
 export default function PlatformOverviewPage() {
   const role = useAuthStore((s) => s.role);
   const [data, setData] = useState<AdminOverview | null>(null);
+  const [trends, setTrends] = useState<AdminTrends | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,12 +69,16 @@ export default function PlatformOverviewPage() {
     else setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/overview`, {
-        headers: getAuthHeaders(),
-        cache: 'no-store',
-      });
+      const opts = { headers: getAuthHeaders(), cache: 'no-store' as const };
+      const [res, trendsRes] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/overview`, opts),
+        // The charts are an extra: if this call fails the overview still
+        // loads, so it must never reject the whole Promise.all.
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/admin/trends?days=30`, opts).catch(() => null),
+      ]);
       if (!res.ok) throw new Error(`Failed to load the platform overview (${res.status})`);
       setData(await res.json());
+      setTrends(trendsRes && trendsRes.ok ? await trendsRes.json() : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load the platform overview');
     } finally {
@@ -257,6 +264,8 @@ export default function PlatformOverviewPage() {
           </>
         )}
       </section>
+
+      <AdminCharts trends={trends} perSpace={perSpace} />
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Spaces">
         <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
