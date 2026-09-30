@@ -44,6 +44,8 @@ interface SpaceInfo {
   id: string;
   name: string;
   slug: string;
+  // Computed server-side by GET /spaces/me (capacity = desks + room seats).
+  counts?: { desks: number; rooms: number; capacity: number };
 }
 
 const PAYMENT_STATUS_STYLE: Record<string, string> = {
@@ -72,12 +74,10 @@ export default function SpaceDetailPage() {
 }
 
 // ---------------------------------------------------------------------
-// A manager or member looking at their own space — unchanged from
-// before this patch. (Its per-zone desk/room counts and the top-line
-// member/utilization numbers are still not wired to real data — GET
-// /zones and GET /spaces/me don't return counts. Left as-is here since
-// fixing it is a separate, small backend change of its own; see
-// PROGRESS.md.)
+// A manager or member looking at their own space. Desk / room / capacity
+// totals come from GET /spaces/me (`counts`, computed server-side). Still
+// not wired to real data: per-zone desk/room counts (GET /zones doesn't
+// return them) and the member/utilization numbers; see PROGRESS.md.
 // ---------------------------------------------------------------------
 function OwnSpaceView({
   routeSpaceId,
@@ -228,16 +228,16 @@ function OwnSpaceView({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-6">
-          <div className="text-center">
-            <div className="p-2 bg-blue-50 rounded-lg inline-flex mb-2">
-              <LayoutGrid className="w-5 h-5 text-blue-600" />
-            </div>
-            <div className="text-2xl font-bold text-slate-900">{zones.length}</div>
-            <div className="text-xs text-slate-500">
-              {zones.length === 1 ? 'Zone' : 'Zones'}
-            </div>
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-6">
+          <StatCard
+            icon={LayoutGrid}
+            color="blue"
+            value={zones.length}
+            label={zones.length === 1 ? 'Zone' : 'Zones'}
+          />
+          <StatCard icon={MapPin} color="purple" value={space.counts?.desks ?? '—'} label="Desks" />
+          <StatCard icon={DoorOpen} color="amber" value={space.counts?.rooms ?? '—'} label="Rooms" />
+          <StatCard icon={Users} color="green" value={space.counts?.capacity ?? '—'} label="Total Capacity" />
         </div>
       </div>
 
