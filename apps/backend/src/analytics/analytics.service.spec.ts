@@ -1,0 +1,302 @@
+import { AnalyticsService } from './analytics.service';
+
+
+function buildPrismaMock(opts: {
+  deskIds: string[];
+  roomIds: string[];
+  totalBookings: number;
+  paidAmounts: number[]; // all-time PAID bookings
+  activeBookings: number;
+  currentPeriodCount: number;
+  previousPeriodCount: number;
+  currentPeriodPaidAmounts: number[];
+  previousPeriodPaidAmounts: number[];
+}) {
+  return {
+   
+    desk: {
+      count: jest.fn().mockResolvedValue(opts.deskIds.length),
+    },
+    room: {
+      count: jest.fn().mockResolvedValue(opts.roomIds.length),
+    },
+    booking: {
+      count: jest.fn((args: any) => {
+        const where = args.where;
+        if (where.startTime) {
+          return Promise.resolve(opts.activeBookings);
+        }
+        if (where.createdAt?.lt) {
+          return Promise.resolve(opts.previousPeriodCount);
+        }
+        if (where.createdAt) {
+          return Promise.resolve(opts.currentPeriodCount);
+        }
+        return Promise.resolve(opts.totalBookings);
+      }),
+      findMany: jest.fn((args: any) => {
+        const where = args.where;
+        const toRows = (amounts: number[]) =>
+          Promise.resolve(amounts.map((amountCents) => ({ amountCents })));
+
+        if (where.createdAt?.lt) {
+          return toRows(opts.previousPeriodPaidAmounts);
+        }
+        if (where.createdAt) {
+          return toRows(opts.currentPeriodPaidAmounts);
+        }
+        return toRows(opts.paidAmounts);
+      }),
+    },
+  };
+}
+
+describe('AnalyticsService.spaceSummary', () => {
+  function makeService(opts: Parameters<typeof buildPrismaMock>[0]) {
+    const prisma = buildPrismaMock(opts);
+    return new AnalyticsService(prisma as any);
+  }
+
+  it('computes totalRevenue, activeBookings, totalBookings, utilizationRate as before', async () => {
+    const service = makeService({
+      deskIds: ['d1', 'd2'],
+      roomIds: ['r1'],
+      totalBookings: 3,
+      paidAmounts: [1000, 2000],
+      activeBookings: 1,
+      currentPeriodCount: 3,
+      previousPeriodCount: 3,
+      currentPeriodPaidAmounts: [1000, 2000],
+      previousPeriodPaidAmounts: [1000, 2000],
+    });
+
+    const result = await service.spaceSummary('space-1');
+
+    expect(result.totalRevenue).toBe(3000);
+    expect(result.activeBookings).toBe(1);
+    expect(result.totalBookings).toBe(3);
+    // 1 active out of 3 total resources
+    expect(result.utilizationRate).toBeCloseTo(1 / 3);
+  });
+
+  it('returns 0% utilization (not NaN) when the space has no desks/rooms at all', async () => {
+    const service = makeService({
+      deskIds: [],
+      roomIds: [],
+      totalBookings: 0,
+      paidAmounts: [],
+      activeBookings: 0,
+      currentPeriodCount: 0,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [],
+      previousPeriodPaidAmounts: [],
+    });
+
+    const result = await service.spaceSummary('space-1');
+    expect(result.utilizationRate).toBe(0);
+  });
+
+  it('computes a real positive revenueChangePct when both periods have revenue', async () => {
+    const service = makeService({
+      deskIds: ['d1'],
+      roomIds: [],
+      totalBookings: 4,
+      paidAmounts: [1000],
+      activeBookings: 0,
+      currentPeriodCount: 2,
+      previousPeriodCount: 2,
+      currentPeriodPaidAmounts: [1500], // $15 this period
+      previousPeriodPaidAmounts: [1000], // $10 last period -> +50%
+    });
+
+    const result = await service.spaceSummary('space-1');
+    expect(result.revenueChangePct).toBeCloseTo(50);
+  });
+
+  it('returns null (not Infinity/NaN) when previous period had zero revenue but current period has some', async () => {
+    const service = makeService({
+      deskIds: ['d1'],
+      roomIds: [],
+      totalBookings: 1,
+      paidAmounts: [1000],
+      activeBookings: 0,
+      currentPeriodCount: 1,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [1000],
+      previousPeriodPaidAmounts: [],
+    });
+
+    const result = await service.spaceSummary('space-1');
+    expect(result.revenueChangePct).toBeNull();
+  });
+
+  it('returns 0 (not null) when both periods have zero revenue/bookings', async () => {
+    const service = makeService({
+      deskIds: ['d1'],
+      roomIds: [],
+      totalBookings: 0,
+      paidAmounts: [],
+      activeBookings: 0,
+      currentPeriodCount: 0,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [],
+      previousPeriodPaidAmounts: [],
+    });
+
+    const result = await service.spaceSummary('space-1');
+    expect(result.revenueChangePct).toBe(0);
+    expect(result.totalBookingsChangePct).toBe(0);
+  });
+
+  it('computes a real negative totalBookingsChangePct when bookings dropped', async () => {
+    const service = makeService({
+      deskIds: ['d1'],
+      roomIds: [],
+      totalBookings: 6,
+      paidAmounts: [],
+      activeBookings: 0,
+      currentPeriodCount: 1,
+      previousPeriodCount: 4, // dropped from 4 to 1 -> -75%
+      currentPeriodPaidAmounts: [],
+      previousPeriodPaidAmounts: [],
+    });
+
+    const result = await service.spaceSummary('space-1');
+    expect(result.totalBookingsChangePct).toBeCloseTo(-75);
+  });
+});
+
+// Stage 9.1a: revenue/booking history must not depend on live desk/room rows.
+describe('AnalyticsService.spaceSummary — scoping (Stage 9)', () => {
+  it('scopes every booking query by Booking.spaceId and excludes cancelled bookings', async () => {
+    const prisma = buildPrismaMock({
+      deskIds: ['d1'],
+      roomIds: [],
+      totalBookings: 1,
+      paidAmounts: [1000],
+      activeBookings: 0,
+      currentPeriodCount: 1,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [1000],
+      previousPeriodPaidAmounts: [],
+    });
+    const service = new AnalyticsService(prisma as any);
+
+    await service.spaceSummary('space-1');
+
+    const wheres = [
+      ...prisma.booking.count.mock.calls.map((c: any[]) => c[0].where),
+      ...prisma.booking.findMany.mock.calls.map((c: any[]) => c[0].where),
+    ];
+    expect(wheres.length).toBeGreaterThan(0);
+    for (const where of wheres) {
+      expect(where.spaceId).toBe('space-1');
+      expect(where.cancelledAt).toBeNull();
+      // No join through desk/room ids anymore.
+      expect(where.OR).toBeUndefined();
+    }
+  });
+
+  it('counts desks and rooms for utilization by live rows in the space', async () => {
+    const prisma = buildPrismaMock({
+      deskIds: ['d1', 'd2'],
+      roomIds: ['r1'],
+      totalBookings: 0,
+      paidAmounts: [],
+      activeBookings: 0,
+      currentPeriodCount: 0,
+      previousPeriodCount: 0,
+      currentPeriodPaidAmounts: [],
+      previousPeriodPaidAmounts: [],
+    });
+    const service = new AnalyticsService(prisma as any);
+
+    await service.spaceSummary('space-9');
+
+    expect(prisma.desk.count).toHaveBeenCalledWith({
+      where: { zone: { spaceId: 'space-9' } },
+    });
+    expect(prisma.room.count).toHaveBeenCalledWith({
+      where: { zone: { spaceId: 'space-9' } },
+    });
+  });
+});
+
+describe('AnalyticsService.trends', () => {
+  const NOW = new Date('2026-09-30T10:00:00.000Z');
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(NOW);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function build(rows: any[] = [], groups: any[] = []) {
+    const prisma: any = {
+      booking: {
+        findMany: jest.fn().mockResolvedValue(rows),
+        groupBy: jest.fn().mockResolvedValue(groups),
+      },
+    };
+    return { service: new AnalyticsService(prisma), prisma };
+  }
+
+  it('returns one zero-filled row per day ending today (UTC), oldest first', async () => {
+    const { service } = build();
+
+    const result = await service.trends('s1', 30);
+
+    expect(result.days).toBe(30);
+    expect(result.series).toHaveLength(30);
+    expect(result.series[0].date).toBe('2026-09-01');
+    expect(result.series[29].date).toBe('2026-09-30');
+    expect(result.series.every((d) => d.bookings === 0 && d.revenueCents === 0)).toBe(true);
+  });
+
+  it('buckets bookings by UTC day and counts revenue for PAID bookings only', async () => {
+    const { service } = build([
+      { createdAt: new Date('2026-09-29T08:00:00Z'), amountCents: 1000, paymentStatus: 'PAID' },
+      { createdAt: new Date('2026-09-29T23:59:00Z'), amountCents: 500, paymentStatus: 'PAID' },
+      { createdAt: new Date('2026-09-29T12:00:00Z'), amountCents: 700, paymentStatus: 'PENDING' },
+      { createdAt: new Date('2026-09-30T00:00:00Z'), amountCents: null, paymentStatus: 'UNPAID' },
+    ]);
+
+    const result = await service.trends('s1', 30);
+
+    const day = (d: string) => result.series.find((r) => r.date === d)!;
+    expect(day('2026-09-29')).toEqual({ date: '2026-09-29', bookings: 3, revenueCents: 1500 });
+    expect(day('2026-09-30')).toEqual({ date: '2026-09-30', bookings: 1, revenueCents: 0 });
+  });
+
+  it('scopes to this space, excludes cancelled bookings, and only reads the window', async () => {
+    const { service, prisma } = build();
+
+    await service.trends('s1', 7);
+
+    const rowsWhere = prisma.booking.findMany.mock.calls[0][0].where;
+    expect(rowsWhere.spaceId).toBe('s1');
+    expect(rowsWhere.cancelledAt).toBeNull();
+    expect(rowsWhere.createdAt.gte).toEqual(new Date('2026-09-24T00:00:00.000Z'));
+    expect(prisma.booking.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { spaceId: 's1', cancelledAt: null } }),
+    );
+  });
+
+  it('reports the desk/room split, with 0 for a type that has no bookings', async () => {
+    const { service } = build([], [{ bookableType: 'DESK', _count: { _all: 7 } }]);
+
+    const result = await service.trends('s1');
+
+    expect(result.byType).toEqual({ desk: 7, room: 0 });
+  });
+
+  it('clamps the window to 7..90 days and falls back to 30 for garbage', async () => {
+    const { service } = build();
+
+    expect((await service.trends('s1', 3)).series).toHaveLength(7);
+    expect((await service.trends('s1', 500)).series).toHaveLength(90);
+    expect((await service.trends('s1', NaN)).series).toHaveLength(30);
+    expect((await service.trends('s1', 0)).series).toHaveLength(30);
+  });
+});

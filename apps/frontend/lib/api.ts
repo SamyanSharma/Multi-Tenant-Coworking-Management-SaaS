@@ -1,0 +1,236 @@
+import { useAuthStore } from '@/store/authStore';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+// Real JWT auth (2026-09-10 backend) replaced the old x-user-role /
+// x-user-id / x-space-id trust headers entirely. The backend no
+// longer reads any of them for identity — a valid Authorization
+// header is now required on every route except @Public() ones
+// (login, health check, Stripe webhook).
+//
+// x-space-id is the one exception that's still sent, and only for
+// PLATFORM_ADMIN: they aren't scoped to a single space, so some
+// routes still need them to say which space they're acting on. For
+// SPACE_MANAGER/MEMBER, spaceId comes from inside their own verified
+// token — sending it here would be ignored by TenantGuard anyway.
+export function getAuthHeaders(): Record<string, string> {
+  const { token, role, spaceId } = useAuthStore.getState();
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (role === 'PLATFORM_ADMIN' && spaceId) {
+    headers['x-space-id'] = spaceId;
+  }
+
+  return headers;
+}
+
+// Nest's default ValidationPipe returns `message` as a string[] (one
+// entry per failed validation rule) — e.g. signing up with a short
+// password AND no space name gives two messages at once. Login/signup
+// errors (UnauthorizedException, ConflictException) return a plain
+// string. Handle both so the caller always gets one readable line.
+function extractErrorMessage(
+  data: { message?: string | string[] } | null,
+  fallback: string,
+): string {
+  if (!data?.message) return fallback;
+  return Array.isArray(data.message)
+    ? data.message.join(', ')
+    : data.message;
+}
+
+export interface LoginResult {
+  accessToken: string;
+  user: {
+    id: string;
+    email: string;
+    name: string | null;
+    role: 'PLATFORM_ADMIN' | 'SPACE_MANAGER' | 'MEMBER';
+    spaceId: string | null;
+  };
+}
+
+// Thin wrapper around POST /auth/login. Throws with the backend's own
+// message (e.g. "Invalid email or password") on a non-2xx response so
+// callers can show it directly rather than a generic failure.
+export async function login(
+  email: string,
+  password: string,
+): Promise<LoginResult> {
+  const res = await fetch(`${API_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Login failed (${res.status})`));
+  }
+
+  return data as LoginResult;
+}
+
+// Space Manager signup ("List my space") creates a brand-new Space
+// plus its first user. Member signup ("Rent a space") creates a plain
+// account with no space at all — picking one is a separate step after
+// signup (see joinSpace() below), from the "browse all spaces" screen.
+// A long dropdown at signup time doesn't scale once there are many
+// spaces on the platform, so that step was removed entirely rather
+// than reworked. Either way POST /auth/signup returns the same shape
+// as login() — the caller is logged straight in.
+export type SignupInput =
+  | {
+      role: 'SPACE_MANAGER';
+      name: string;
+      email: string;
+      password: string;
+      spaceName: string;
+    }
+  | {
+      role: 'MEMBER';
+      name: string;
+      email: string;
+      password: string;
+    };
+
+export async function signup(input: SignupInput): Promise<LoginResult> {
+  const res = await fetch(`${API_URL}/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Signup failed (${res.status})`));
+  }
+
+  return data as LoginResult;
+}
+
+export interface PublicSpace {
+  id: string;
+  name: string;
+  priceCents: number | null;
+  members: number;
+  desks: number;
+  rooms: number;
+}
+
+// Powers the "browse all spaces" screen — shown to a signed-in Member
+// with no spaceId yet (there's no other way in now that signup no
+// longer assigns one), and reused for anyone just looking. No
+// Authorization header on purpose: this same list is also shown to a
+// brand-new account before they've picked anything, and the data
+// itself (name/price/rough size, no slug or Stripe/user fields) was
+// never sensitive.
+export async function getPublicSpaces(): Promise<PublicSpace[]> {
+  const res = await fetch(`${API_URL}/spaces/public`);
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Could not load spaces (${res.status})`));
+  }
+
+  return data as PublicSpace[];
+}
+
+// A MEMBER with no space yet picks one from getPublicSpaces() and
+// calls this. Returns a fresh LoginResult — the caller's OLD token
+// still carries spaceId: null, so the returned accessToken must
+// replace it (the frontend does this the same way login()/signup()
+// results are stored).
+export async function joinSpace(spaceId: string): Promise<LoginResult> {
+  const res = await fetch(`${API_URL}/spaces/${spaceId}/join`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Could not join space (${res.status})`));
+  }
+
+  return data as LoginResult;
+}
+
+// PLATFORM_ADMIN drill-down into one (possibly not their own) space.
+// These three take the target space's id in the URL path, not from
+// x-space-id/getAuthHeaders() — unlike every other admin-scoped call
+// in this file, so they work regardless of authStore's spaceId (which
+// stays null for ADMIN; see getAuthHeaders' own comment).
+export interface AdminSpaceDetail {
+  id: string;
+  name: string;
+  slug: string;
+  status: 'ACTIVE' | 'CLOSED';
+  priceCents: number | null;
+  createdAt: string;
+  deletedAt: string | null;
+  manager: { id: string; name: string | null; email: string } | null;
+  counts: { members: number; zones: number; desks: number; rooms: number };
+  revenue: {
+    netCents: number;
+    refundedCents: number;
+    pendingRefundCents: number;
+    platformFeeNetCents: number;
+    last30d: { netCents: number; bookings: number };
+  };
+  zones: Array<{ id: string; name: string; desks: number; rooms: number }>;
+}
+
+export interface AdminMember {
+  id: string;
+  name: string | null;
+  email: string;
+  createdAt: string;
+}
+
+export interface AdminBookingRow {
+  id: string;
+  bookableType: 'DESK' | 'ROOM';
+  bookableName: string | null;
+  userName: string | null;
+  userEmail: string;
+  startTime: string;
+  endTime: string;
+  paymentStatus: string;
+  amountCents: number | null;
+  refundedAmountCents: number | null;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminSpaceBookingsPage {
+  page: number;
+  pageSize: number;
+  total: number;
+  rows: AdminBookingRow[];
+}
+
+async function adminGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, { headers: getAuthHeaders(), cache: 'no-store' });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(extractErrorMessage(data, `Request failed (${res.status})`));
+  }
+  return data as T;
+}
+
+export function getAdminSpaceDetail(spaceId: string) {
+  return adminGet<AdminSpaceDetail>(`/admin/spaces/${spaceId}`);
+}
+
+export function getAdminSpaceMembers(spaceId: string) {
+  return adminGet<AdminMember[]>(`/admin/spaces/${spaceId}/members`);
+}
+
+export function getAdminSpaceBookings(spaceId: string, page = 1, pageSize = 25) {
+  return adminGet<AdminSpaceBookingsPage>(
+    `/admin/spaces/${spaceId}/bookings?page=${page}&pageSize=${pageSize}`,
+  );
+}

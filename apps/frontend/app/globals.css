@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Removed: a prefers-color-scheme dark override that swapped
+   --foreground to near-white (#ededed). Every component in this app
+   uses hardcoded light-theme Tailwind classes (bg-white, text-slate-900,
+   etc.) regardless of OS theme -- there is no actual dark mode UI here.
+   On a machine with OS dark mode on, that override made body text
+   nearly invisible against the app's always-white card backgrounds.
+   Pin to the light foreground always, matching what the app actually
+   looks like. */
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}

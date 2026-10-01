@@ -1,0 +1,1155 @@
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BookableType } from '@prisma/client';
+import { BookingsService } from './bookings.service';
+
+const FUTURE_START = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+const FUTURE_END = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+
+function buildDeps() {
+  const prisma: any = {
+    desk: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'desk-1',
+        name: 'Desk A1',
+        zone: { spaceId: 'space-1' },
+      }),
+      findMany: jest.fn().mockResolvedValue([{ id: 'desk-1' }]),
+    },
+    room: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    space: {
+      findUnique: jest.fn().mockResolvedValue({ priceCents: 1000 }),
+    },
+    user: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'manager-1',
+        stripeAccountId: 'acct_123',
+        stripeOnboardingComplete: true,
+      }),
+      // Used by findAllForSpace's post-fetch enrichment (attachDisplayFields)
+      // to attach who booked each row — irrelevant to the payment-flow
+      // fixtures above, which don't set userId, so an empty result is fine.
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    booking: {
+      findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(),
+      update: jest.fn(),
+      // retryPayment claims the booking with a conditional updateMany
+      // before calling Stripe (count 1 = this request won the claim).
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      delete: jest.fn(),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
+  };
+
+  prisma.$transaction = jest.fn((cb: (tx: unknown) => unknown) =>
+    cb({ booking: { create: prisma.booking.create } }),
+  );
+
+  const eventsGateway = { emitBookingCreated: jest.fn() };
+
+  const stripeService = {
+    createBookingPaymentIntent: jest.fn().mockResolvedValue({
+      id: 'pi_123',
+      client_secret: 'pi_123_secret_abc',
+      application_fee_amount: 50,
+    }),
+    getPaymentIntentStatus: jest.fn(),
+    cancelPaymentIntent: jest.fn().mockResolvedValue('canceled'),
+  };
+
+  const service = new BookingsService(
+    prisma as any,
+    eventsGateway as any,
+    stripeService as any,
+  );
+
+  return { service, prisma, eventsGateway, stripeService };
+}
+
+describe('BookingsService.create — payment flow', () => {
+  it('creates a PaymentIntent and returns clientSecret when the manager is onboarded', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.create.mockResolvedValue({
+      id: 'booking-1',
+      amountCents: 1000,
+    });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-1',
+      amountCents: 1000,
+      paymentStatus: 'PENDING',
+      stripePaymentIntentId: 'pi_123',
+    });
+
+    const result = await service.create(
+      {
+        bookableType: BookableType.DESK,
+        bookableId: 'desk-1',
+        startTime: FUTURE_START,
+        endTime: FUTURE_END,
+      },
+      'space-1',
+      'user-1',
+    );
+
+    expect(stripeService.createBookingPaymentIntent).toHaveBeenCalledWith({
+      amountCents: 1000,
+      connectedAccountId: 'acct_123',
+      bookingId: 'booking-1',
+    });
+    expect(result.clientSecret).toBe('pi_123_secret_abc');
+    expect(result.paymentStatus).toBe('PENDING');
+  });
+
+  it('does NOT create a PaymentIntent when the manager has not completed onboarding — booking stays UNPAID, clientSecret is null', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'manager-1',
+      stripeAccountId: null,
+      stripeOnboardingComplete: false,
+    });
+    prisma.booking.create.mockResolvedValue({
+      id: 'booking-2',
+      amountCents: 1000,
+      paymentStatus: 'UNPAID',
+    });
+
+    const result = await service.create(
+      {
+        bookableType: BookableType.DESK,
+        bookableId: 'desk-1',
+        startTime: FUTURE_START,
+        endTime: FUTURE_END,
+      },
+      'space-1',
+      'user-1',
+    );
+
+    expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
+    expect(result.clientSecret).toBeNull();
+    expect(result.paymentStatus).toBe('UNPAID');
+  });
+
+  it('deletes the booking and throws Conflict when PaymentIntent creation fails (no orphaned unpayable booking)', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-3', amountCents: 1000 });
+    stripeService.createBookingPaymentIntent.mockRejectedValue(
+      new Error('Stripe is down'),
+    );
+
+    await expect(
+      service.create(
+        {
+          bookableType: BookableType.DESK,
+          bookableId: 'desk-1',
+          startTime: FUTURE_START,
+          endTime: FUTURE_END,
+        },
+        'space-1',
+        'user-1',
+      ),
+    ).rejects.toThrow(ConflictException);
+
+    expect(prisma.booking.delete).toHaveBeenCalledWith({
+      where: { id: 'booking-3' },
+    });
+  });
+
+  it('clears any abandoned hold on this exact resource before attempting to create the new booking — cancelling its PaymentIntent first', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    // First findMany call = the stale-hold lookup inside create().
+    prisma.booking.findMany.mockResolvedValueOnce([
+      { id: 'stale-1', stripePaymentIntentId: 'pi_stale' },
+    ]);
+    prisma.booking.create.mockResolvedValue({ id: 'booking-5', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-5',
+      amountCents: 1000,
+      paymentStatus: 'PENDING',
+    });
+
+    await service.create(
+      {
+        bookableType: BookableType.DESK,
+        bookableId: 'desk-1',
+        startTime: FUTURE_START,
+        endTime: FUTURE_END,
+      },
+      'space-1',
+      'user-1',
+    );
+
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+      where: {
+        bookableType: BookableType.DESK,
+        bookableId: 'desk-1',
+        paymentStatus: { in: ['PENDING', 'FAILED'] },
+        holdExpiresAt: { lt: expect.any(Date) },
+      },
+      select: { id: true, stripePaymentIntentId: true },
+    });
+    expect(stripeService.cancelPaymentIntent).toHaveBeenCalledWith('pi_stale');
+    expect(prisma.booking.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['stale-1'] } },
+    });
+  });
+
+  it('sets holdExpiresAt roughly 15 minutes in the future when creating a PaymentIntent', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-6', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-6',
+      amountCents: 1000,
+      paymentStatus: 'PENDING',
+    });
+
+    const before = Date.now();
+    await service.create(
+      {
+        bookableType: BookableType.DESK,
+        bookableId: 'desk-1',
+        startTime: FUTURE_START,
+        endTime: FUTURE_END,
+      },
+      'space-1',
+      'user-1',
+    );
+    const after = Date.now();
+
+    const updateCall = prisma.booking.update.mock.calls[0][0];
+    const holdExpiresAt: Date = updateCall.data.holdExpiresAt;
+
+    expect(holdExpiresAt.getTime()).toBeGreaterThanOrEqual(before + 15 * 60 * 1000 - 1000);
+    expect(holdExpiresAt.getTime()).toBeLessThanOrEqual(after + 15 * 60 * 1000 + 1000);
+  });
+
+  it('broadcasts booking_created with the real booking (not clientSecret leaked into the room)', async () => {
+    const { service, prisma, eventsGateway } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-4', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-4',
+      amountCents: 1000,
+      paymentStatus: 'PENDING',
+    });
+
+    await service.create(
+      {
+        bookableType: BookableType.DESK,
+        bookableId: 'desk-1',
+        startTime: FUTURE_START,
+        endTime: FUTURE_END,
+      },
+      'space-1',
+      'user-1',
+    );
+
+    expect(eventsGateway.emitBookingCreated).toHaveBeenCalledWith(
+      'space-1',
+      expect.objectContaining({ id: 'booking-4' }),
+    );
+    const broadcastArg = eventsGateway.emitBookingCreated.mock.calls[0][1];
+    expect(broadcastArg.clientSecret).toBeUndefined();
+  });
+});
+
+describe('BookingsService.findAllForSpace — payment reconciliation', () => {
+  it('leaves PAID/FAILED/UNPAID bookings untouched — no Stripe calls for them', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PAID', stripePaymentIntentId: 'pi_1' },
+      { id: 'b2', paymentStatus: 'UNPAID', stripePaymentIntentId: null },
+      { id: 'b3', paymentStatus: 'FAILED', stripePaymentIntentId: 'pi_3' },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(stripeService.getPaymentIntentStatus).not.toHaveBeenCalled();
+    expect(result).toHaveLength(3);
+    expect(prisma.booking.update).not.toHaveBeenCalled();
+  });
+
+  it('flips a PENDING booking to PAID when Stripe reports the PaymentIntent succeeded — self-heals a booking stuck PENDING because the webhook never arrived', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'succeeded',
+      hasFailedAttempt: false,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0].paymentStatus).toBe('PAID');
+    expect(prisma.booking.update).toHaveBeenCalledWith({
+      where: { id: 'b1' },
+      data: {
+        paymentStatus: 'PAID',
+        holdExpiresAt: null,
+        paidAt: expect.any(Date),
+      },
+    });
+  });
+
+  it('flips a PENDING booking to FAILED after a declined card (requires_payment_method + hasFailedAttempt)', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'requires_payment_method',
+      hasFailedAttempt: true,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0].paymentStatus).toBe('FAILED');
+  });
+
+  it('does NOT flip a fresh, never-attempted PaymentIntent to FAILED just because it is requires_payment_method (that is the normal starting status)', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'requires_payment_method',
+      hasFailedAttempt: false,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0].paymentStatus).toBe('PENDING');
+    expect(prisma.booking.update).not.toHaveBeenCalled();
+  });
+
+  it('leaves genuinely in-progress statuses (requires_action, processing) as PENDING', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+      { id: 'b2', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_2' },
+    ]);
+    stripeService.getPaymentIntentStatus
+      .mockResolvedValueOnce({ status: 'requires_action', hasFailedAttempt: false })
+      .mockResolvedValueOnce({ status: 'processing', hasFailedAttempt: false });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result.map((b) => b.paymentStatus)).toEqual(['PENDING', 'PENDING']);
+    expect(prisma.booking.update).not.toHaveBeenCalled();
+  });
+
+  it('does not let one failed Stripe lookup break the rest of the list', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_1' },
+      { id: 'b2', paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_2' },
+    ]);
+    stripeService.getPaymentIntentStatus
+      .mockRejectedValueOnce(new Error('Stripe API down'))
+      .mockResolvedValueOnce({ status: 'succeeded', hasFailedAttempt: false });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result.find((b) => b.id === 'b1')?.paymentStatus).toBe('PENDING');
+    expect(result.find((b) => b.id === 'b2')?.paymentStatus).toBe('PAID');
+  });
+
+  it('deletes and excludes a PENDING booking whose hold has expired — frees the slot for others', async () => {
+    const { service, prisma } = buildDeps();
+    const expiredAt = new Date(Date.now() - 60 * 1000);
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: expiredAt,
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(0);
+    expect(prisma.booking.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['b1'] } },
+    });
+  });
+
+  it('cancels the PaymentIntent BEFORE deleting an expired hold, so a late card confirmation cannot charge for a slot that was released', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    const order: string[] = [];
+    stripeService.cancelPaymentIntent.mockImplementation(async () => {
+      order.push('cancel');
+      return 'canceled';
+    });
+    prisma.booking.deleteMany.mockImplementation(async () => {
+      order.push('delete');
+      return { count: 1 };
+    });
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: new Date(Date.now() - 60 * 1000),
+      },
+    ]);
+
+    await service.findAllForSpace('space-1');
+
+    expect(stripeService.cancelPaymentIntent).toHaveBeenCalledWith('pi_1');
+    expect(order).toEqual(['cancel', 'delete']);
+  });
+
+  it('keeps an expired hold (and its slot) if the member paid at the last moment — marks it PAID instead of deleting a paid booking', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    stripeService.cancelPaymentIntent.mockResolvedValue('succeeded');
+    prisma.booking.updateMany.mockResolvedValue({ count: 1 });
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: new Date(Date.now() - 60 * 1000),
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+    const call = prisma.booking.updateMany.mock.calls[0][0];
+    expect(call.data.paymentStatus).toBe('PAID');
+    expect(call.where.paymentStatus).toEqual({ in: ['PENDING', 'FAILED'] });
+  });
+
+  it('keeps an expired hold if Stripe cannot confirm the cancellation — never frees a slot while the charge may still be live', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    stripeService.cancelPaymentIntent.mockRejectedValue(new Error('stripe down'));
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: new Date(Date.now() - 60 * 1000),
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('deletes and excludes a FAILED booking whose hold has expired', async () => {
+    const { service, prisma } = buildDeps();
+    const expiredAt = new Date(Date.now() - 60 * 1000);
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'FAILED',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: expiredAt,
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(0);
+  });
+
+  it('keeps a PENDING booking whose hold has NOT expired yet', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    const notYetExpired = new Date(Date.now() + 5 * 60 * 1000);
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: notYetExpired,
+      },
+    ]);
+    stripeService.getPaymentIntentStatus.mockResolvedValue({
+      status: 'requires_payment_method',
+      hasFailedAttempt: false,
+    });
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('never expires a PAID or UNPAID booking regardless of holdExpiresAt (those are not holds)', async () => {
+    const { service, prisma } = buildDeps();
+    const longExpired = new Date(Date.now() - 999 * 60 * 1000);
+    prisma.booking.findMany.mockResolvedValue([
+      { id: 'b1', paymentStatus: 'PAID', stripePaymentIntentId: 'pi_1', holdExpiresAt: null },
+      { id: 'b2', paymentStatus: 'UNPAID', stripePaymentIntentId: null, holdExpiresAt: longExpired },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(2);
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('BookingsService.retryPayment', () => {
+  it('deletes the booking and rejects when the FAILED booking\'s hold already expired — does not resurrect it with a fresh PaymentIntent', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    const expiredAt = new Date(Date.now() - 60 * 1000); // 1 minute ago
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'FAILED',
+      amountCents: 1000,
+      stripePaymentIntentId: 'pi_old',
+      holdExpiresAt: expiredAt,
+    });
+
+    await expect(
+      service.retryPayment('booking-1', 'space-1', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(stripeService.cancelPaymentIntent).toHaveBeenCalled();
+    expect(prisma.booking.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['booking-1'] } },
+    });
+    expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('allows retrying a FAILED booking whose hold has NOT expired yet', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    const notYetExpired = new Date(Date.now() + 5 * 60 * 1000); // 5 min from now
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'FAILED',
+      amountCents: 1000,
+      holdExpiresAt: notYetExpired,
+    });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-1',
+      paymentStatus: 'PENDING',
+    });
+
+    const result = await service.retryPayment('booking-1', 'space-1', 'user-1');
+
+    expect(prisma.booking.delete).not.toHaveBeenCalled();
+    expect(stripeService.createBookingPaymentIntent).toHaveBeenCalled();
+    expect(result.clientSecret).toBeDefined();
+  });
+
+  it('rejects retrying payment on a booking that belongs to a different user', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'someone-else',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'FAILED',
+      amountCents: 1000,
+    });
+
+    // 404, not 400/403: never confirm that another user's booking id exists.
+    await expect(
+      service.retryPayment('booking-1', 'space-1', 'user-1'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('throws NotFoundException for a booking id that does not exist', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.retryPayment('missing', 'space-1', 'user-1'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('rejects retrying a booking that is already PAID', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'PAID',
+      amountCents: 1000,
+    });
+
+    await expect(
+      service.retryPayment('booking-1', 'space-1', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('rejects retrying a booking that is already PENDING (avoids a second PaymentIntent)', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'PENDING',
+      amountCents: 1000,
+    });
+
+    await expect(
+      service.retryPayment('booking-1', 'space-1', 'user-1'),
+    ).rejects.toThrow(ConflictException);
+    expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the space manager has not completed Stripe onboarding', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'FAILED',
+      amountCents: 1000,
+    });
+    prisma.user.findFirst.mockResolvedValue({
+      stripeAccountId: null,
+      stripeOnboardingComplete: false,
+    });
+
+    await expect(
+      service.retryPayment('booking-1', 'space-1', 'user-1'),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('creates a fresh PaymentIntent and returns a clientSecret for a FAILED booking', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'FAILED',
+      amountCents: 1000,
+    });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-1',
+      paymentStatus: 'PENDING',
+      stripePaymentIntentId: 'pi_456',
+    });
+    stripeService.createBookingPaymentIntent.mockResolvedValue({
+      id: 'pi_456',
+      client_secret: 'pi_456_secret_xyz',
+    });
+
+    const result = await service.retryPayment('booking-1', 'space-1', 'user-1');
+
+    expect(stripeService.createBookingPaymentIntent).toHaveBeenCalledWith({
+      amountCents: 1000,
+      connectedAccountId: 'acct_123',
+      bookingId: 'booking-1',
+    });
+    expect(result.clientSecret).toBe('pi_456_secret_xyz');
+  });
+
+  describe('atomic claim (no double PaymentIntent on concurrent retries)', () => {
+    const failedBooking = {
+      id: 'booking-1',
+      userId: 'user-1',
+      bookableType: BookableType.DESK,
+      bookableId: 'desk-1',
+      paymentStatus: 'FAILED',
+      amountCents: 1000,
+      stripePaymentIntentId: 'pi_old',
+      holdExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    };
+
+    it('claims the booking with a conditional update (status as read, same owner, not cancelled) BEFORE calling Stripe', async () => {
+      const { service, prisma, stripeService } = buildDeps();
+      prisma.booking.findUnique.mockResolvedValue(failedBooking);
+      prisma.booking.update.mockResolvedValue({ id: 'booking-1', paymentStatus: 'PENDING' });
+
+      const order: string[] = [];
+      prisma.booking.updateMany.mockImplementation(async () => {
+        order.push('claim');
+        return { count: 1 };
+      });
+      stripeService.createBookingPaymentIntent.mockImplementation(async () => {
+        order.push('stripe');
+        return { id: 'pi_new', client_secret: 'secret' };
+      });
+
+      await service.retryPayment('booking-1', 'space-1', 'user-1');
+
+      expect(order).toEqual(['claim', 'stripe']);
+      const claim = prisma.booking.updateMany.mock.calls[0][0];
+      expect(claim.where).toEqual({
+        id: 'booking-1',
+        userId: 'user-1',
+        cancelledAt: null,
+        paymentStatus: 'FAILED',
+      });
+      expect(claim.data.paymentStatus).toBe('PENDING');
+    });
+
+    it('turns away a request that lost the claim (409) without ever calling Stripe', async () => {
+      const { service, prisma, stripeService } = buildDeps();
+      prisma.booking.findUnique.mockResolvedValue(failedBooking);
+      prisma.booking.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.retryPayment('booking-1', 'space-1', 'user-1'),
+      ).rejects.toThrow(ConflictException);
+      expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
+    });
+
+    it('hands the booking back in its previous state if Stripe fails, and rethrows', async () => {
+      const { service, prisma, stripeService } = buildDeps();
+      prisma.booking.findUnique.mockResolvedValue(failedBooking);
+      stripeService.createBookingPaymentIntent.mockRejectedValue(new Error('stripe down'));
+
+      await expect(
+        service.retryPayment('booking-1', 'space-1', 'user-1'),
+      ).rejects.toThrow('stripe down');
+
+      const revert = prisma.booking.updateMany.mock.calls[1][0];
+      expect(revert.where).toEqual({
+        id: 'booking-1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_old',
+      });
+      expect(revert.data).toEqual({
+        paymentStatus: 'FAILED',
+        holdExpiresAt: failedBooking.holdExpiresAt,
+      });
+    });
+  });
+});
+
+describe('BookingsService.create — hold is set at insert time', () => {
+  const dto = {
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime: FUTURE_START,
+    endTime: FUTURE_END,
+  };
+
+  it('inserts the row PENDING with a ~15 minute hold when payment is required, so a crash before the PaymentIntent exists cannot block the slot forever', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1', paymentStatus: 'PENDING' });
+
+    await service.create(dto, 'space-1', 'user-1');
+
+    const data = prisma.booking.create.mock.calls[0][0].data;
+    expect(data.paymentStatus).toBe('PENDING');
+    const minutes = (data.holdExpiresAt.getTime() - Date.now()) / 60000;
+    expect(minutes).toBeGreaterThan(14);
+    expect(minutes).toBeLessThanOrEqual(15);
+  });
+
+  it('leaves the row UNPAID with no hold when the manager cannot take payments yet', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'manager-1',
+      stripeAccountId: null,
+      stripeOnboardingComplete: false,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+
+    await service.create(dto, 'space-1', 'user-1');
+
+    const data = prisma.booking.create.mock.calls[0][0].data;
+    expect(data.paymentStatus).toBeUndefined();
+    expect(data.holdExpiresAt).toBeUndefined();
+  });
+});
+
+// Stage 9.1a: a Booking is financial history and must not depend on live
+// Desk/Room rows, so it snapshots its space / readable name / platform fee /
+// paid-at, and is read back by its own spaceId.
+describe('BookingsService — Stage 9 snapshots', () => {
+  const dto = () => ({
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime: FUTURE_START,
+    endTime: FUTURE_END,
+  });
+
+  it('snapshots spaceId and the desk/room name onto the new booking', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1' });
+
+    await service.create(dto(), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        spaceId: 'space-1',
+        bookableName: 'Desk A1',
+        amountCents: 1000,
+      }),
+    });
+  });
+
+  it('snapshots the exact application fee Stripe was given (not a recomputed guess)', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1' });
+
+    await service.create(dto(), 'space-1', 'user-1');
+
+    expect(prisma.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: expect.objectContaining({
+        paymentStatus: 'PENDING',
+        platformFeeCents: 50,
+      }),
+    });
+  });
+
+  it('stores a null fee snapshot when Stripe reports no application fee', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    stripeService.createBookingPaymentIntent.mockResolvedValue({
+      id: 'pi_nofee',
+      client_secret: 'secret',
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'booking-1' });
+
+    await service.create(dto(), 'space-1', 'user-1');
+
+    expect(prisma.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: expect.objectContaining({ platformFeeCents: null }),
+    });
+  });
+
+  it('lists bookings by their own spaceId — never by joining through live desk/room ids', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1');
+
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+      where: { spaceId: 'space-1' },
+      orderBy: { startTime: 'asc' },
+    });
+    // The old implementation looked up desk/room ids first; a soft-deleted
+    // desk would then have hidden its bookings. Must not happen anymore.
+    expect(prisma.desk.findMany).not.toHaveBeenCalled();
+    expect(prisma.room.findMany).not.toHaveBeenCalled();
+  });
+
+  it('still lists a booking whose desk no longer exists (history survives deletion)', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findMany.mockResolvedValue([]); // desk gone
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b-old',
+        spaceId: 'space-1',
+        bookableId: 'deleted-desk',
+        bookableName: 'Desk A1',
+        paymentStatus: 'PAID',
+        stripePaymentIntentId: 'pi_x',
+        holdExpiresAt: null,
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].bookableName).toBe('Desk A1');
+  });
+
+  it('scopes to one userId when a caller id is passed (a Member must never see another Member\'s bookings)', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1', 'user-me');
+
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+      where: { spaceId: 'space-1', userId: 'user-me' },
+      orderBy: { startTime: 'asc' },
+    });
+  });
+
+  it('omits the userId filter entirely (not userId: undefined) when no caller id is passed — a Space Manager sees the whole space', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    await service.findAllForSpace('space-1');
+
+    const whereArg = prisma.booking.findMany.mock.calls[0][0].where;
+    expect(whereArg).toEqual({ spaceId: 'space-1' });
+    expect('userId' in whereArg).toBe(false);
+  });
+
+  it('attaches userName/userEmail/zoneName/spaceName by looking up the booker and the desk/room\'s zone and space', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        userId: 'user-1',
+        bookableType: 'DESK',
+        bookableId: 'desk-1',
+        paymentStatus: 'PAID',
+      },
+      {
+        id: 'b2',
+        userId: 'user-2',
+        bookableType: 'ROOM',
+        bookableId: 'room-1',
+        paymentStatus: 'PAID',
+      },
+    ]);
+    prisma.user.findMany.mockResolvedValue([
+      { id: 'user-1', name: 'Alice', email: 'alice@acme.test' },
+      { id: 'user-2', name: null, email: 'bob@acme.test' },
+    ]);
+    prisma.desk.findMany.mockResolvedValue([
+      { id: 'desk-1', zone: { name: 'Main Floor', space: { name: 'Acme HQ' } } },
+    ]);
+    prisma.room.findMany.mockResolvedValue([
+      { id: 'room-1', zone: { name: 'Annex', space: { name: 'Acme HQ' } } },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result[0]).toMatchObject({
+      userName: 'Alice',
+      userEmail: 'alice@acme.test',
+      zoneName: 'Main Floor',
+      spaceName: 'Acme HQ',
+    });
+    expect(result[1]).toMatchObject({
+      userName: null,
+      userEmail: 'bob@acme.test',
+      zoneName: 'Annex',
+      spaceName: 'Acme HQ',
+    });
+  });
+
+  it('does not query user/desk/room at all for an empty booking list', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.booking.findMany.mockResolvedValue([]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toEqual([]);
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('BookingsService.create — dynamic per-resource pricing', () => {
+  const dto = (startTime: string, endTime: string) => ({
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime,
+    endTime,
+  });
+
+  const HOUR = 60 * 60 * 1000;
+  const now = () => Date.now();
+
+  it('charges hourlyRateCents × exact quarter-hours — a 90-minute booking bills exactly 1.5 hours, not 2', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1',
+      name: 'Desk A1',
+      zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500,
+      dailyRateCents: null,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 750 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 90 * 60 * 1000).toISOString();
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 750 }), // 500 * 1.5 = 750 (90 min is an exact multiple of 15)
+    });
+  });
+
+  it('bills a partial quarter-hour by rounding UP to the next 15-minute block, minimum one block', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500, dailyRateCents: null,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 125 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    // 10 minutes rounds up to one 15-minute block (0.25h): 500 * 0.25 = 125
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 10 * 60 * 1000).toISOString();
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 125 }),
+    });
+  });
+
+  it('charges dailyRateCents × ceil(days) when only a daily rate is set', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: null, dailyRateCents: 4000,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 8000 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 30 * 60 * 60 * 1000).toISOString(); // 30h -> 2 days
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 8000 }), // 4000 * ceil(30/24) = 8000
+    });
+  });
+
+  it('with both rates set, charges min(hourly x hours, days x daily + remaining hours x hourly) — 25h is 1 day + 1 hour, not 2 days', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500, dailyRateCents: 4000,
+    });
+    prisma.booking.create
+      .mockResolvedValueOnce({ id: 'b1', amountCents: 2000 })
+      .mockResolvedValueOnce({ id: 'b2', amountCents: 4500 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    // 3 hours -> 500 * 3 = 1500
+    const shortStart = new Date(now() + HOUR).toISOString();
+    const shortEnd = new Date(now() + HOUR + 3 * HOUR).toISOString();
+    await service.create(dto(shortStart, shortEnd), 'space-1', 'user-1');
+    expect(prisma.booking.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({ amountCents: 1500 }),
+    });
+
+    // 25 hours -> 1 day + 1 hour = 4000 + 500 = 4500 (NOT 2 days = 8000)
+    const longStart = new Date(now() + HOUR).toISOString();
+    const longEnd = new Date(now() + HOUR + 25 * HOUR).toISOString();
+    await service.create(dto(longStart, longEnd), 'space-1', 'user-1');
+    expect(prisma.booking.create).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({ amountCents: 4500 }),
+    });
+  });
+
+  it('bills 1 day + a partial quarter-hour proportionally, not as a full extra hour', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500, dailyRateCents: 4000,
+    });
+    // 24h 15min -> 1 day + one 15-min block = 4000 + (500 * 0.25) = 4125
+    // (NOT 1 day + 1 full hour = 4500, which the old 1-hour-minimum policy
+    // used to charge for any overshoot past the day boundary at all).
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 4125 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 24 * HOUR + 15 * 60 * 1000).toISOString();
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 4125 }),
+    });
+  });
+
+  it('falls back to Space.priceCents (flat) when the desk has no rate of its own — pre-migration desks stay bookable', async () => {
+    const { service, prisma } = buildDeps();
+    // buildDeps' default desk mock has no hourlyRateCents/dailyRateCents,
+    // and its default space mock has priceCents: 1000.
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    await service.create(dto(FUTURE_START, FUTURE_END), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 1000 }),
+    });
+  });
+
+  it('rejects with a clear message when neither the desk nor the space has any price configured', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: null, dailyRateCents: null,
+    });
+    prisma.space.findUnique.mockResolvedValue({ priceCents: null });
+
+    await expect(
+      service.create(dto(FUTURE_START, FUTURE_END), 'space-1', 'user-1'),
+    ).rejects.toThrow('Booking price has not been configured for this desk/room');
+    expect(prisma.booking.create).not.toHaveBeenCalled();
+  });
+
+  it('passes the same computed amountCents to the Stripe PaymentIntent as was stored on the booking — never a stale flat price', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 700, dailyRateCents: null,
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 1400 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 2 * HOUR).toISOString(); // exactly 2h
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(stripeService.createBookingPaymentIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ amountCents: 1400 }), // 700 * 2, not the flat space price (1000)
+    );
+  });
+});
+
+describe('BookingsService.create — inactive zone', () => {
+  const dto = {
+    bookableType: BookableType.DESK,
+    bookableId: 'desk-1',
+    startTime: FUTURE_START,
+    endTime: FUTURE_END,
+  };
+
+  it('refuses a new booking in an inactive zone, before any hold, booking row or Stripe call', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1',
+      name: 'Desk A1',
+      zone: { spaceId: 'space-1', isActive: false },
+    });
+
+    await expect(service.create(dto, 'space-1', 'user-1')).rejects.toThrow(
+      'This zone is currently inactive and cannot be booked',
+    );
+
+    expect(prisma.booking.create).not.toHaveBeenCalled();
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+    expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
+  });
+
+  it('still books normally in an active zone', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1',
+      name: 'Desk A1',
+      zone: { spaceId: 'space-1', isActive: true },
+    });
+    prisma.booking.create.mockResolvedValue({ id: 'booking-1', amountCents: 1000 });
+    prisma.booking.update.mockResolvedValue({
+      id: 'booking-1', amountCents: 1000, paymentStatus: 'PENDING', stripePaymentIntentId: 'pi_123',
+    });
+
+    const result = await service.create(dto, 'space-1', 'user-1');
+
+    expect(result.paymentStatus).toBe('PENDING');
+  });
+});
