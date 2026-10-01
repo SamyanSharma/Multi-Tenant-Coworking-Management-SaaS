@@ -37,7 +37,6 @@ export class TenantGuard implements CanActivate {
       const spaceIdHeader = request.headers['x-space-id'];
 
       if (!spaceIdHeader) {
-    .
         return true;
       }
 

@@ -12,7 +12,7 @@ import { LIVE } from '../common/live';
 @Injectable()
 export class DesksService {
   constructor(private readonly prisma: PrismaService) {}
- are hidden.
+
   findAllForSpace(spaceId: string, activeOnly = false) {
     return this.prisma.desk.findMany({
       where: {
