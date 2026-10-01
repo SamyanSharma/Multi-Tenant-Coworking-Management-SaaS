@@ -12,7 +12,6 @@ import { LIVE } from '../common/live';
 @Injectable()
 export class DesksService {
   constructor(private readonly prisma: PrismaService) {}
- are hidden.
   findAllForSpace(spaceId: string, activeOnly = false) {
     return this.prisma.desk.findMany({
       where: {
@@ -33,8 +32,6 @@ export class DesksService {
       desk.zone.spaceId !== spaceId ||
       (activeOnly && !desk.zone.isActive)
     ) {
-      // 404 rather than 403: doesn't confirm to the caller that a desk
-      // with this id exists at all in a DIFFERENT tenant.
       throw new NotFoundException('Desk not found in this space');
     }
     return desk;

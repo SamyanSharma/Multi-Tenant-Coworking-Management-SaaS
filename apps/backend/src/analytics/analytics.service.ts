@@ -6,7 +6,7 @@ export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
  
- 
+  async bookingsPerZone(spaceId: string) {
     const zones = await this.prisma.zone.findMany({
       where: { spaceId, deletedAt: null },
       select: {
@@ -43,24 +43,16 @@ export class AnalyticsService {
 
 
   async spaceSummary(spaceId: string) {
-    // Resource counts (denominator of utilization) still come from the
-    // live desks/rooms -- that is exactly what "utilization" should mean.
     const [deskCount, roomCount] = await Promise.all([
       this.prisma.desk.count({ where: { zone: { spaceId } } }),
       this.prisma.room.count({ where: { zone: { spaceId } } }),
     ]);
     const totalResourceCount = deskCount + roomCount;
 
-    // Stage 9: bookings are scoped by their own spaceId snapshot, NOT by
-    // joining through live desk/room ids -- otherwise deleting a desk would
-    // silently remove its paid bookings from revenue. Cancelled bookings
-    // (deleted-resource refunds) never count as bookings; their money
-    // leaves `paymentStatus: PAID` on its own when refunded.
     const bookingWhere = { spaceId, cancelledAt: null };
 
     const now = new Date();
 
-   
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const currentPeriodStart = new Date(now.getTime() - THIRTY_DAYS_MS);
     const previousPeriodStart = new Date(
@@ -132,7 +124,6 @@ export class AnalyticsService {
       activeBookings,
       totalBookings,
       utilizationRate,
-     
       revenueChangePct: this.pctChange(
         currentPeriodRevenue,
         previousPeriodRevenue,
@@ -144,7 +135,6 @@ export class AnalyticsService {
     };
   }
 
-  
   async trends(spaceId: string, days = 30) {
     const window = Math.min(Math.max(Math.trunc(days) || 30, 7), 90);
 
