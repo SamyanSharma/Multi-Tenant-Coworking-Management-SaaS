@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 
-import { BookableType, Prisma } from '@prisma/client';
+import { BookableType, PaymentStatus, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -502,48 +502,55 @@ export class BookingsService {
       },
     });
 
+    const paymentsEnabled = Boolean(
+      spaceManager.stripeAccountId && spaceManager.stripeOnboardingComplete,
+    );
+
     try {
-
-
-      const booking =
-        await this.prisma.$transaction(
-          async (tx) => {
-
-            return tx.booking.create({
-              data: {
-                bookableType,
-                bookableId,
-                userId,
-                startTime,
-                endTime,
-                amountCents,
-                // Stage 9 snapshots: financial history must not depend on
-                // the live Desk/Room row (which may later be soft-deleted).
-                spaceId,
-                bookableName: bookable.name,
-              },
-            });
-
-          },
-        );
-
-
+      // A single insert is already atomic, so no $transaction wrapper is
+      // needed. The overlap guarantee comes from the database's
+      // no_overlapping_bookings EXCLUDE constraint (caught below as a 409),
+      // not from application-level locking.
+      //
+      // When payment is required the row is created PENDING *with* its hold
+      // expiry in the same insert. Previously it was inserted UNPAID with no
+      // expiry and only upgraded after the PaymentIntent was created, so a
+      // crash in between left a slot blocked forever (nothing ever expired
+      // it). Now an abandoned row carries holdExpiresAt and is released by
+      // the same expiry logic as any other hold.
+      const booking = await this.prisma.booking.create({
+        data: {
+          bookableType,
+          bookableId,
+          userId,
+          startTime,
+          endTime,
+          amountCents,
+          // Stage 9 snapshots: financial history must not depend on
+          // the live Desk/Room row (which may later be soft-deleted).
+          spaceId,
+          bookableName: bookable.name,
+          ...(paymentsEnabled && {
+            paymentStatus: PaymentStatus.PENDING,
+            holdExpiresAt: new Date(
+              Date.now() + HOLD_DURATION_MINUTES * 60 * 1000,
+            ),
+          }),
+        },
+      });
 
       let updatedBooking = booking;
       let clientSecret: string | null = null;
 
 
 
-      if (
-        spaceManager.stripeAccountId &&
-        spaceManager.stripeOnboardingComplete
-      ) {
+      if (paymentsEnabled) {
 
         try {
           const result = await this.createAndAttachPaymentIntent(
             booking.id,
             amountCents,
-            spaceManager.stripeAccountId,
+            spaceManager.stripeAccountId!,
           );
 
           updatedBooking = result.booking;
@@ -635,9 +642,8 @@ export class BookingsService {
     }
 
     if (booking.userId !== userId) {
-      throw new BadRequestException(
-        'You can only retry payment on your own booking',
-      );
+      // 404, not 400/403: don't confirm that someone else's booking id exists.
+      throw new NotFoundException('Booking not found');
     }
 
     // Confirms the booking's bookable actually belongs to this
@@ -661,7 +667,10 @@ export class BookingsService {
     }
 
     if (booking.paymentStatus === 'PENDING') {
-      throw new BadRequestException(
+      // 409, same as losing the atomic claim below: "a payment is already
+      // in progress" is a conflict with current state, however early or
+      // late a concurrent request happens to notice it.
+      throw new ConflictException(
         'A payment is already in progress for this booking — check your email or wait a moment and refresh',
       );
     }
@@ -704,14 +713,61 @@ export class BookingsService {
       );
     }
 
-    const { booking: updatedBooking, clientSecret } =
-      await this.createAndAttachPaymentIntent(
-        booking.id,
-        booking.amountCents,
-        spaceManager.stripeAccountId,
-      );
+    // Claim the booking atomically BEFORE talking to Stripe. The status
+    // checks above are only a fast path: two simultaneous retries (double
+    // click, two tabs) would both pass them and each create a PaymentIntent
+    // for the same booking. This conditional update lets exactly one
+    // request flip the row to PENDING; the other matches zero rows and is
+    // turned away without ever reaching Stripe.
+    const previous = {
+      paymentStatus: booking.paymentStatus,
+      holdExpiresAt: booking.holdExpiresAt,
+    };
 
-    return { ...updatedBooking, clientSecret };
+    const claim = await this.prisma.booking.updateMany({
+      where: {
+        id: booking.id,
+        userId,
+        cancelledAt: null,
+        paymentStatus: booking.paymentStatus,
+      },
+      data: {
+        paymentStatus: PaymentStatus.PENDING,
+        holdExpiresAt: new Date(
+          Date.now() + HOLD_DURATION_MINUTES * 60 * 1000,
+        ),
+      },
+    });
+
+    if (claim.count === 0) {
+      throw new ConflictException(
+        'A payment is already in progress for this booking',
+      );
+    }
+
+    try {
+      const { booking: updatedBooking, clientSecret } =
+        await this.createAndAttachPaymentIntent(
+          booking.id,
+          booking.amountCents,
+          spaceManager.stripeAccountId,
+        );
+
+      return { ...updatedBooking, clientSecret };
+    } catch (err) {
+      // Stripe refused or failed: hand the booking back in the state it was
+      // in so the member can try again, instead of leaving it PENDING with
+      // no PaymentIntent behind it until the hold times out.
+      await this.prisma.booking.updateMany({
+        where: {
+          id: booking.id,
+          paymentStatus: PaymentStatus.PENDING,
+          stripePaymentIntentId: booking.stripePaymentIntentId,
+        },
+        data: previous,
+      });
+      throw err;
+    }
   }
 
   private async createAndAttachPaymentIntent(
