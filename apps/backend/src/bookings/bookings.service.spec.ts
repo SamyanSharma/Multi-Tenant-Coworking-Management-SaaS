@@ -957,7 +957,7 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
   const HOUR = 60 * 60 * 1000;
   const now = () => Date.now();
 
-  it('charges hourlyRateCents × ceil(hours) — a 90-minute booking bills 2 full hours', async () => {
+  it('charges hourlyRateCents × exact quarter-hours — a 90-minute booking bills exactly 1.5 hours, not 2', async () => {
     const { service, prisma } = buildDeps();
     prisma.desk.findUnique.mockResolvedValue({
       id: 'desk-1',
@@ -966,7 +966,7 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
       hourlyRateCents: 500,
       dailyRateCents: null,
     });
-    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 1000 });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 750 });
     prisma.booking.update.mockResolvedValue({ id: 'b1' });
 
     const start = new Date(now() + HOUR).toISOString();
@@ -974,25 +974,26 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
     await service.create(dto(start, end), 'space-1', 'user-1');
 
     expect(prisma.booking.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ amountCents: 1000 }), // 500 * ceil(1.5) = 1000
+      data: expect.objectContaining({ amountCents: 750 }), // 500 * 1.5 = 750 (90 min is an exact multiple of 15)
     });
   });
 
-  it('never bills less than 1 hour, even for a 10-minute booking', async () => {
+  it('bills a partial quarter-hour by rounding UP to the next 15-minute block, minimum one block', async () => {
     const { service, prisma } = buildDeps();
     prisma.desk.findUnique.mockResolvedValue({
       id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
       hourlyRateCents: 500, dailyRateCents: null,
     });
-    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 500 });
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 125 });
     prisma.booking.update.mockResolvedValue({ id: 'b1' });
 
+    // 10 minutes rounds up to one 15-minute block (0.25h): 500 * 0.25 = 125
     const start = new Date(now() + HOUR).toISOString();
     const end = new Date(now() + HOUR + 10 * 60 * 1000).toISOString();
     await service.create(dto(start, end), 'space-1', 'user-1');
 
     expect(prisma.booking.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ amountCents: 500 }),
+      data: expect.objectContaining({ amountCents: 125 }),
     });
   });
 
@@ -1039,6 +1040,27 @@ describe('BookingsService.create — dynamic per-resource pricing', () => {
     await service.create(dto(longStart, longEnd), 'space-1', 'user-1');
     expect(prisma.booking.create).toHaveBeenNthCalledWith(2, {
       data: expect.objectContaining({ amountCents: 4500 }),
+    });
+  });
+
+  it('bills 1 day + a partial quarter-hour proportionally, not as a full extra hour', async () => {
+    const { service, prisma } = buildDeps();
+    prisma.desk.findUnique.mockResolvedValue({
+      id: 'desk-1', name: 'Desk A1', zone: { spaceId: 'space-1' },
+      hourlyRateCents: 500, dailyRateCents: 4000,
+    });
+    // 24h 15min -> 1 day + one 15-min block = 4000 + (500 * 0.25) = 4125
+    // (NOT 1 day + 1 full hour = 4500, which the old 1-hour-minimum policy
+    // used to charge for any overshoot past the day boundary at all).
+    prisma.booking.create.mockResolvedValue({ id: 'b1', amountCents: 4125 });
+    prisma.booking.update.mockResolvedValue({ id: 'b1' });
+
+    const start = new Date(now() + HOUR).toISOString();
+    const end = new Date(now() + HOUR + 24 * HOUR + 15 * 60 * 1000).toISOString();
+    await service.create(dto(start, end), 'space-1', 'user-1');
+
+    expect(prisma.booking.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amountCents: 4125 }),
     });
   });
 

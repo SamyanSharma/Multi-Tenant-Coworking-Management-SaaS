@@ -118,25 +118,34 @@ export class BookingsService {
       return dailyRateCents! * days;
     }
 
-    // Any partial hour is rounded UP first, minimum 1 hour.
-    const totalHours = Math.max(1, Math.ceil(durationHours));
+    // Billed in 15-minute blocks, rounded UP, minimum one block (15 min).
+    // A flat 1-hour minimum was too coarse — it charged a 15-minute
+    // booking the same as a 59-minute one. Quarter-hour granularity still
+    // rounds in the platform's favor (never down), just with a finer
+    // grain. totalHours stays a multiple of 0.25 from here on, e.g. a
+    // 20-minute stay becomes 2 blocks -> 0.5h, not 1h.
+    const billableQuarterHours = Math.max(1, Math.ceil(durationMinutes / 15));
+    const totalHours = billableQuarterHours / 4;
 
     // Hourly rate only.
     if (dailyRateCents == null) {
-      return hourlyRateCents * totalHours;
+      return Math.round(hourlyRateCents * totalHours);
     }
 
     // Both rates set — take the cheaper of:
     //   (a) pure hourly:             hourly x totalHours
     //   (b) full days + leftover hrs: days x daily + remainingHours x hourly
-    // so a 25h booking costs 1 day + 1 hour, not 2 full days.
+    // so a 25h booking costs 1 day + 1 hour, not 2 full days, and
+    // 1 day 15 min costs 1 day + 15 min of hourly, not 1 day + 1 hour.
     const days = Math.floor(totalHours / 24);
-    const remainingHours = totalHours % 24;
+    const remainingHours = totalHours - days * 24;
     const hourlyOnly = hourlyRateCents * totalHours;
     const daysPlusHours =
       days * dailyRateCents + remainingHours * hourlyRateCents;
 
-    return Math.min(hourlyOnly, daysPlusHours);
+    // Round once, at the end, since quarter-hour fractions of a cents
+    // rate (e.g. 333c/hr x 0.25h) aren't always a whole number of cents.
+    return Math.round(Math.min(hourlyOnly, daysPlusHours));
   }
 
 
