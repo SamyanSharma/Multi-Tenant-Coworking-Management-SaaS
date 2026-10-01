@@ -47,6 +47,17 @@ const QUICK_LOGIN_USERS = [
 
 const DEV_PASSWORD = 'password123';
 
+// The one-click seeded-account shortcuts (and the shared dev password
+// printed beside them) are for local development and for a deliberate demo.
+// In a production build they are hidden unless NEXT_PUBLIC_DEMO_MODE=true,
+// so a deployed instance does not advertise working admin/manager
+// credentials on its login screen. The login form itself is always shown —
+// this page is the app's real sign-in (the root route redirects here).
+// NEXT_PUBLIC_* values are inlined at build time, so set it when building.
+const SHOW_QUICK_LOGIN =
+  process.env.NODE_ENV !== 'production' ||
+  process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
+
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
 export default function LoginPage() {
@@ -212,6 +223,7 @@ export default function LoginPage() {
             </p>
           </form>
 
+          {SHOW_QUICK_LOGIN && (
           <div className="px-6 pb-6">
             <div className="flex items-center gap-2 mb-3">
               <div className="h-px flex-1 bg-slate-200" />
@@ -279,6 +291,7 @@ export default function LoginPage() {
               these fail.
             </p>
           </div>
+          )}
         </div>
       </div>
     </div>
