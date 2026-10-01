@@ -5,8 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
- 
- 
+  async bookingsPerZone(spaceId: string) {
     const zones = await this.prisma.zone.findMany({
       where: { spaceId, deletedAt: null },
       select: {
