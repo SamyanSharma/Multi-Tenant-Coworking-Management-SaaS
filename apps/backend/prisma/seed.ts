@@ -22,14 +22,15 @@ const prisma = new PrismaClient({ adapter });
 
 // Fixed, hardcoded dev-only IDs (NOT real cuids from a random run).
 //
-// These exist so `apps/frontend/app/dev-login/page.tsx` can hardcode
-// matching userIds/spaceId and NOT go stale every time someone reseeds
-// or resets the DB — Prisma's default `@default(cuid())` would otherwise
-// generate a new id per run, which is exactly the "stale localStorage
-// id -> silent 404" bug class this project already hit once (see
-// PROGRESS.md's 2026-08-23 evening entry). Keep these two files in sync
-// if either changes. Both dev-login and this pinning should be removed
-// together before a real/final deployment — see PROGRESS.md.
+// These exist so the same seeded userIds/spaceId stay stable across every
+// reseed or DB reset, which previously relied on `apps/frontend/app/
+// dev-login/page.tsx` (now `app/login/page.tsx`, with its one-click
+// shortcuts removed for the final submission — sign in with the emails
+// below and DEV_PASSWORD). Without pinning, Prisma's default
+// `@default(cuid())` would generate a new id per run, which is exactly
+// the "stale localStorage id -> silent 404" bug class this project
+// already hit once (see PROGRESS.md's 2026-08-23 evening entry). Keep
+// this file and the login page in sync if either changes.
 //
 // MUST match TenantGuard's CUID_REGEX (/^c[a-z0-9]{20,}$/i) — start with
 // 'c', lowercase alphanumeric only, no underscores, 21+ chars total. The
@@ -44,8 +45,8 @@ const DEV_ADMIN_ID = 'cdevseedadmin000000000001';
 
 async function main() {
   // Hashed once and reused for every seeded user — real auth means
-  // dev-login's old role-switcher is retired in favor of actually
-  // logging in via POST /auth/login with these credentials.
+  // logging in via POST /auth/login with these credentials (the old
+  // header-based role-switcher is long retired).
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, 10);
 
   const admin = await prisma.user.upsert({

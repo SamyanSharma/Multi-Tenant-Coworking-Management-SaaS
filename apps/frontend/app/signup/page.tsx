@@ -252,7 +252,7 @@ export default function SignupPage() {
             <p className="text-sm text-slate-600">
               Already have an account?{' '}
               <Link
-                href="/dev-login"
+                href="/login"
                 className="text-slate-900 font-medium hover:underline"
               >
                 Sign in

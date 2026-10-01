@@ -7,56 +7,14 @@ import { useAuthStore } from '@/store/authStore';
 import { login } from '@/lib/api';
 import { homeFor } from '@/lib/home';
 import {
-  Shield,
-  User,
-  ArrowRight,
-  Loader2,
-  AlertCircle,
-  CheckCircle2,
   Terminal,
-  Crown,
   LogIn,
   Eye,
   EyeOff,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
-
-// Real credentials seed.ts prints after `npx prisma db seed` — kept
-// here only as quick-fill shortcuts for local dev/demo speed, not as
-// a bypass of real login. Clicking one still calls POST /auth/login
-// with these exact credentials, same as typing them in by hand.
-const QUICK_LOGIN_USERS = [
-  {
-    label: 'Platform Admin',
-    email: 'admin@platform.dev',
-    icon: Crown,
-    accentColor: 'purple',
-  },
-  {
-    label: 'Space Manager',
-    email: 'manager@test-space.dev',
-    icon: Shield,
-    accentColor: 'blue',
-  },
-  {
-    label: 'Member',
-    email: 'member@test-space.dev',
-    icon: User,
-    accentColor: 'green',
-  },
-] as const;
-
-const DEV_PASSWORD = 'password123';
-
-// The one-click seeded-account shortcuts (and the shared dev password
-// printed beside them) are for local development and for a deliberate demo.
-// In a production build they are hidden unless NEXT_PUBLIC_DEMO_MODE=true,
-// so a deployed instance does not advertise working admin/manager
-// credentials on its login screen. The login form itself is always shown —
-// this page is the app's real sign-in (the root route redirects here).
-// NEXT_PUBLIC_* values are inlined at build time, so set it when building.
-const SHOW_QUICK_LOGIN =
-  process.env.NODE_ENV !== 'production' ||
-  process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
@@ -69,16 +27,14 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [activeQuickLogin, setActiveQuickLogin] = useState<
-    string | null
-  >(null);
 
-  async function doLogin(loginEmail: string, loginPassword: string) {
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setStatus('loading');
     setError(null);
 
     try {
-      const result = await login(loginEmail, loginPassword);
+      const result = await login(email, password);
 
       setAuth({
         token: result.accessToken,
@@ -93,22 +49,8 @@ export default function LoginPage() {
       }, 300);
     } catch (err) {
       setStatus('error');
-      setActiveQuickLogin(null);
       setError(err instanceof Error ? err.message : 'Login failed');
     }
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setActiveQuickLogin(null);
-    void doLogin(email, password);
-  }
-
-  function handleQuickLogin(quickEmail: string) {
-    setActiveQuickLogin(quickEmail);
-    setEmail(quickEmail);
-    setPassword(DEV_PASSWORD);
-    void doLogin(quickEmail, DEV_PASSWORD);
   }
 
   return (
@@ -204,7 +146,7 @@ export default function LoginPage() {
               disabled={status === 'loading'}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors"
             >
-              {status === 'loading' && !activeQuickLogin ? (
+              {status === 'loading' ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <LogIn className="w-4 h-4" />
@@ -222,76 +164,6 @@ export default function LoginPage() {
               </Link>
             </p>
           </form>
-
-          {SHOW_QUICK_LOGIN && (
-          <div className="px-6 pb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-px flex-1 bg-slate-200" />
-              <span className="text-xs text-slate-400 uppercase tracking-wider">
-                Dev quick login
-              </span>
-              <div className="h-px flex-1 bg-slate-200" />
-            </div>
-
-            <div className="space-y-2">
-              {QUICK_LOGIN_USERS.map((user) => {
-                const Icon = user.icon;
-                const isActive = activeQuickLogin === user.email;
-                const isLoading = isActive && status === 'loading';
-
-                return (
-                  <button
-                    key={user.email}
-                    type="button"
-                    onClick={() => handleQuickLogin(user.email)}
-                    disabled={status === 'loading'}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-slate-200 hover:border-slate-300 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed transition-all text-left"
-                  >
-                    <div
-                      className={`p-2 rounded-lg shrink-0 ${
-                        user.accentColor === 'purple'
-                          ? 'bg-purple-100'
-                          : user.accentColor === 'blue'
-                            ? 'bg-blue-100'
-                            : 'bg-green-100'
-                      }`}
-                    >
-                      <Icon
-                        className={`w-4 h-4 ${
-                          user.accentColor === 'purple'
-                            ? 'text-purple-600'
-                            : user.accentColor === 'blue'
-                              ? 'text-blue-600'
-                              : 'text-green-600'
-                        }`}
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900">
-                        {user.label}
-                      </p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {user.email}
-                      </p>
-                    </div>
-                    {isLoading ? (
-                      <Loader2 className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
-                    ) : (
-                      <ArrowRight className="w-4 h-4 text-slate-400 shrink-0" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <p className="text-xs text-slate-400 mt-3">
-              These call the real login endpoint with seeded dev
-              credentials (password &quot;{DEV_PASSWORD}&quot;) — not a
-              bypass. Run <code>npx prisma db seed</code> first if
-              these fail.
-            </p>
-          </div>
-          )}
         </div>
       </div>
     </div>

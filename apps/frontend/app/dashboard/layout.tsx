@@ -153,7 +153,7 @@ export default function DashboardLayout({
               onClick={() => {
                 logout();
                 disconnectSocket();
-                router.push('/dev-login');
+                router.push('/login');
               }}
               className="mt-auto px-3 py-2 rounded hover:bg-slate-700 text-sm text-left text-slate-400"
             >
