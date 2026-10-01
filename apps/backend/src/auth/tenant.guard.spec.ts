@@ -12,9 +12,7 @@ describe('TenantGuard', () => {
     guard = new TenantGuard(reflector);
   });
 
-  // Builds a fake ExecutionContext with req.user already set, the way
-  // JwtAuthGuard (which runs before TenantGuard in the real app) would
-  // have set it from a verified JWT.
+.
   function mockContext(
     user: { id: string; role: Role; spaceId: string | null } | undefined,
     headers: Record<string, string> = {},

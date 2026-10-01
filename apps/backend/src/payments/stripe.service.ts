@@ -143,8 +143,7 @@ export class StripeService {
         },
 
         configuration: {
-          // merchant.card_payments: lets this account be the
-          // customer-facing merchant for a card charge.
+          
           merchant: {
             capabilities: {
               card_payments: {
@@ -153,14 +152,7 @@ export class StripeService {
             },
           },
 
-          // recipient.stripe_balance.stripe_transfers: lets this
-          // account actually RECEIVE the transfer_data.destination
-          // transfer that createBookingPaymentIntent() sends it.
-          // Without this, every PaymentIntent creation fails with
-          // "Your destination account needs to have at least one of
-          // the following capabilities enabled: transfers..." —
-          // merchant alone only covers charging a card, not being the
-          // destination of a transfer.
+          
           recipient: {
             capabilities: {
               stripe_balance: {
@@ -246,11 +238,7 @@ export class StripeService {
     return link.url;
   }
 
-  // Same shape of account data the account.updated webhook receives
-  // (Stripe.Account, extended with the v2-preview fields this app's
-  // Accounts v2 accounts actually carry) — used by both the webhook
-  // handler and getAccountStatus() below so the two can never
-  // disagree about what "onboarding complete" means.
+  
   static computeOnboardingStatus(
     account: Stripe.Account & {
       requirements?: {
@@ -290,13 +278,7 @@ export class StripeService {
     };
   }
 
-  // Actively asks Stripe for this account's current state, rather
-  // than only trusting the account.updated webhook. This matters
-  // because in local dev, that webhook simply never arrives unless
-  // `stripe listen --forward-to localhost:3000/payments/webhook` is
-  // running — completing onboarding in the browser would otherwise
-  // leave stripeOnboardingComplete permanently stuck at false with no
-  // way to self-correct.
+
   async getAccountStatus(accountId: string) {
     const response = await this.stripe.rawRequest(
       'GET',
@@ -310,28 +292,7 @@ export class StripeService {
     );
   }
 
-  // Actively checks a PaymentIntent's real status, the same way
-  // getAccountStatus() does for onboarding — used by
-  // bookings.service.ts to self-heal bookings stuck at PENDING
-  // because payment_intent.succeeded/failed never arrived (e.g.
-  // `stripe listen` wasn't running yet when the payment was
-  // confirmed). hasFailedAttempt distinguishes a genuinely fresh
-  // PaymentIntent (status requires_payment_method, never attempted)
-  // from one that reverted to requires_payment_method after a
-  // decline — only the latter should be treated as FAILED.
-  // Stage 9: full refund of a booking's payment, used when a Space Manager
-  // deletes a desk/room/zone (or space) that has a paid, upcoming booking.
-  //
-  // The charge is a DESTINATION charge (transfer_data.destination +
-  // application_fee_amount), so a refund needs two extra flags or the money
-  // would come out of the PLATFORM's balance only:
-  //   reverse_transfer: true        -> pull the manager's 95% share back
-  //   refund_application_fee: true  -> give the platform's 5% back too
-  // The customer therefore gets 100% back, funded by the two parties that
-  // received it. (Stripe's own processing fee is not returned.)
-  //
-  // The idempotency key makes this safe to call again after a timeout or a
-  // crash: Stripe returns the SAME refund instead of refunding twice.
+  
   async refundBookingPayment(
     paymentIntentId: string,
     bookingId: string,
@@ -353,10 +314,6 @@ export class StripeService {
     };
   }
 
-  // Stage 9: stop a member from paying for a booking that was just cancelled.
-  // Never throws for "already in a final state" -- it reports the state so
-  // the caller can decide (a PaymentIntent that already SUCCEEDED must be
-  // refunded, not cancelled).
   async cancelPaymentIntent(
     paymentIntentId: string,
   ): Promise<'canceled' | 'succeeded' | 'other'> {

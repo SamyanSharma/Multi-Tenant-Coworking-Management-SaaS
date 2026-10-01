@@ -3,9 +3,7 @@ import { Roles, Role } from '../auth/roles.decorator';
 import { SkipTenantCheck } from '../auth/skip-tenant-check.decorator';
 import { AdminService } from './admin.service';
 
-// Cross-tenant by design: only PLATFORM_ADMIN, and SkipTenantCheck because an
-// admin is not scoped to one space. Every number is computed by AdminService
-// with database aggregates.
+
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
@@ -17,8 +15,7 @@ export class AdminController {
     return this.adminService.overview();
   }
 
-  // Chart data across all tenants. ?days=30 (clamped to 7..90 in the
-  // service; anything unparsable = 30).
+
   @Roles(Role.PLATFORM_ADMIN)
   @SkipTenantCheck()
   @Get('trends')
@@ -26,10 +23,7 @@ export class AdminController {
     return this.adminService.trends(days === undefined ? undefined : Number(days));
   }
 
-  // The "click into a space" drill-down (name, manager, live
-  // zone/desk/room counts, revenue). :id is any space's id, not the
-  // caller's own — unlike every other :id route in this app, which is
-  // why this lives under /admin rather than /spaces/:id.
+
   @Roles(Role.PLATFORM_ADMIN)
   @SkipTenantCheck()
   @Get('spaces/:id')

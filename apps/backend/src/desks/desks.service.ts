@@ -12,10 +12,7 @@ import { LIVE } from '../common/live';
 @Injectable()
 export class DesksService {
   constructor(private readonly prisma: PrismaService) {}
-
-  // Desk has no spaceId column — filter through the relation:
-  // "desks whose zone belongs to this space".
-  // `activeOnly` is true for Members: desks in an inactive zone are hidden.
+ are hidden.
   findAllForSpace(spaceId: string, activeOnly = false) {
     return this.prisma.desk.findMany({
       where: {
@@ -52,9 +49,7 @@ export class DesksService {
       throw new ForbiddenException('Zone does not belong to this space');
     }
 
-    // A desk created with no rate at all is exactly how bookings ended
-    // up failing with "Booking price has not been configured" — fix
-    // it at the source rather than only at booking time.
+    
     if (dto.hourlyRateCents == null && dto.dailyRateCents == null) {
       throw new BadRequestException(
         'Set an hourly rate, a daily rate, or both, for this desk',
@@ -71,18 +66,11 @@ export class DesksService {
     });
   }
 
-  // Rename / re-rate. Existing bookings keep the name and price they
-  // were made under (Booking.bookableName/amountCents are snapshots) —
-  // changing a desk's rate here never rewrites past bookings.
+ 
   async update(id: string, dto: UpdateDeskDto, spaceId: string) {
     const existing = await this.findOne(id, spaceId);
 
-    // "Omit both rate fields" means "leave rates as they are" (see
-    // UpdateDeskDto) — but the RESULT must still have at least one
-    // rate, so block a combination that would clear the only one set
-    // (e.g. explicitly sending hourlyRateCents but the desk only ever
-    // had a daily rate isn't possible via this DTO shape, but a future
-    // "clear rate" feature must preserve this invariant).
+    
     const nextHourly = dto.hourlyRateCents ?? existing.hourlyRateCents;
     const nextDaily = dto.dailyRateCents ?? existing.dailyRateCents;
     if (nextHourly == null && nextDaily == null) {

@@ -1,7 +1,4 @@
-// Turns "Acme Coworking!!" into "acme-coworking". Used at signup time
-// since self-serve Space Managers pick a space *name*, not a slug —
-// POST /spaces (the PLATFORM_ADMIN route) still requires callers to
-// supply a slug directly, this is a signup-only convenience.
+
 export function slugify(input: string): string {
   return input
     .toLowerCase()

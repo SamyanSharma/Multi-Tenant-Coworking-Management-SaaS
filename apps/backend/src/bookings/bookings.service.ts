@@ -17,12 +17,6 @@ const PRISMA_UNIQUE_CONSTRAINT_VIOLATION = 'P2002';
 const PRISMA_EXCLUSION_CONSTRAINT_VIOLATION = 'P2039';
 const POSTGRES_EXCLUSION_VIOLATION = '23P01';
 
-// How long a PENDING or FAILED (declined-but-not-yet-retried) booking
-// holds its slot before it's treated as abandoned and released — same
-// idea as a movie-ticket seat hold. 15 minutes chosen to match the
-// new 15-minute time-slot granularity elsewhere in this change; not a
-// value the person building this system stated, so worth revisiting
-// if a different hold window is wanted.
 const HOLD_DURATION_MINUTES = 15;
 
 @Injectable()
@@ -75,21 +69,7 @@ export class BookingsService {
     );
   }
 
-  // Dynamic pricing: charges duration × the desk/room's own rate,
-  // rather than always the flat per-space price (the original design,
-  // which also had a sharp edge — a manager could easily forget to set
-  // Space.priceCents at all, and every booking attempt would then fail
-  // with "not configured", which is exactly what was reported).
-  //
-  // Both rates set: Total = min(hourly x hours,
-  // days x daily + remainingHours x hourly) — see below.
-  //
-  // Rounding: duration is rounded to the nearest whole minute first
-  // (booking times only ever carry minute precision in practice; this
-  // just guards against float drift in the ms subtraction below), then
-  // any partial hour/day is rounded UP — a 61-minute booking on an
-  // hourly rate is billed as 2 hours, never 1. Every duration is
-  // billed for at least 1 unit, even if it's a few minutes.
+  
   private calculateAmountCents(
     bookable: { hourlyRateCents: number | null; dailyRateCents: number | null },
     startTime: Date,
@@ -132,11 +112,7 @@ export class BookingsService {
       return Math.round(hourlyRateCents * totalHours);
     }
 
-    // Both rates set — take the cheaper of:
-    //   (a) pure hourly:             hourly x totalHours
-    //   (b) full days + leftover hrs: days x daily + remainingHours x hourly
-    // so a 25h booking costs 1 day + 1 hour, not 2 full days, and
-    // 1 day 15 min costs 1 day + 15 min of hourly, not 1 day + 1 hour.
+    
     const days = Math.floor(totalHours / 24);
     const remainingHours = totalHours - days * 24;
     const hourlyOnly = hourlyRateCents * totalHours;
@@ -150,28 +126,13 @@ export class BookingsService {
 
 
   async findAllForSpace(spaceId: string, scopeToUserId?: string) {
-    // Stage 9: scoped by the Booking's own spaceId snapshot instead of
-    // joining through live Desk/Room ids. That join would silently drop a
-    // booking's history the moment its desk/room is (soft-)deleted; the
-    // snapshot column keeps every booking visible to its space regardless.
-    //
-    // scopeToUserId: a MEMBER must only ever see their own bookings —
-    // this was previously missing entirely, so any Member could see
-    // every other Member's booking history for the space (their desk,
-    // their times, their payment status). The controller passes the
-    // caller's own id here for MEMBER and leaves it undefined for
-    // SPACE_MANAGER, who legitimately needs the whole space's activity.
+    
     const bookings = await this.prisma.booking.findMany({
       where: {
         spaceId,
         ...(scopeToUserId ? { userId: scopeToUserId } : {}),
       },
-      // Baseline chronological order — no explicit orderBy previously,
-      // meaning the API returned whatever order Postgres happened to
-      // give back (effectively arbitrary, not something to rely on).
-      // The frontend applies a smarter active/upcoming/completed
-      // grouping on top of this for display, but the API itself
-      // shouldn't hand back an unordered list.
+      
       orderBy: { startTime: 'asc' },
     });
 
@@ -181,19 +142,7 @@ export class BookingsService {
     return this.attachDisplayFields(reconciled);
   }
 
-  // Attaches who booked it (userName/userEmail) and which zone/space the
-  // desk/room lives in (zoneName/spaceName) — a Space Manager needs both
-  // to make sense of their space's activity, which the raw Booking row
-  // can't show on its own. A Member also needs spaceName now that they
-  // can switch between spaces (see the space-switch feature): "Second
-  // Floor - Desk 1" is ambiguous once a member has bookings in more than
-  // one space. Looked up live via userId/bookableId rather than
-  // snapshotted at booking time: unlike bookableName (which must
-  // survive the desk/room itself being deleted, so the booking stays
-  // legible), User/Desk/Room rows are never hard-deleted (see the
-  // schema's own comments to that effect), so this join is always
-  // safe — even after a soft delete, the row and its zone/space are
-  // still there to look up.
+  
   private async attachDisplayFields<
     T extends {
       userId: string;
@@ -272,21 +221,7 @@ export class BookingsService {
     }));
   }
 
-  // Releases expired holds WITHOUT leaving a payable PaymentIntent behind.
-  //
-  // Deleting the booking row alone is not enough: the member's checkout
-  // form may still be open, and a PaymentIntent that stays live could be
-  // confirmed after the slot was handed to someone else — a successful
-  // charge for a booking that no longer exists. So for each expired hold we
-  // first cancel its PaymentIntent, and only then delete the row:
-  //   - cancelled            -> safe to delete (slot freed)
-  //   - already succeeded    -> the member paid at the last moment: mark the
-  //                             booking PAID and KEEP it (never delete a
-  //                             paid booking)
-  //   - Stripe call failed   -> KEEP the row and try again on the next pass;
-  //                             freeing the slot while the charge is still
-  //                             live is the one outcome we must avoid.
-  // Returns the ids that were actually released.
+  
   private async releaseExpiredHolds(
     rows: { id: string; stripePaymentIntentId: string | null }[],
   ): Promise<Set<string>> {
@@ -337,11 +272,7 @@ export class BookingsService {
     return released;
   }
 
-  // A held slot (PENDING or FAILED with holdExpiresAt in the past) is
-  // deleted outright, not just hidden — leaving the row around would
-  // still block that time range via the no_overlapping_bookings
-  // exclusion constraint even though nobody's actually holding it
-  // anymore, the exact bug this feature exists to prevent.
+ 
   private async expireStaleHolds<
     T extends {
       id: string;
@@ -373,13 +304,6 @@ export class BookingsService {
     return bookings.filter((b) => !releasedIds.has(b.id));
   }
 
-  // Self-heals bookings stuck at PENDING because
-  // payment_intent.succeeded/failed never arrived — the same problem
-  // account.updated had for onboarding status, fixed the same way:
-  // actively ask Stripe instead of only trusting the webhook. Runs on
-  // every list load; only PENDING rows with a stripePaymentIntentId
-  // cost a Stripe API call, so this is cheap for a real class demo's
-  // booking volume.
   private async reconcilePendingPayments<
     T extends {
       id: string;
@@ -511,10 +435,7 @@ export class BookingsService {
       spaceId,
     );
 
-    // Zone switched off by the manager: refuse NEW bookings. Strict
-    // `=== false` on purpose. Existing bookings, and retryPayment for a
-    // hold someone already has, are deliberately left alone: the customer
-    // already committed before the zone was switched off.
+   
     if (bookable.zone.isActive === false) {
       throw new BadRequestException(
         'This zone is currently inactive and cannot be booked',
@@ -532,13 +453,7 @@ export class BookingsService {
         },
       });
 
-    // Dynamic pricing: an hourly/daily rate on the desk/room itself
-    // (set when the manager created it) takes priority; space.priceCents
-    // is only a fallback for a desk/room that predates this feature and
-    // hasn't been given its own rate yet. Throws the same "not configured"
-    // message as before if NEITHER exists anywhere — but now that error
-    // should be rare, since DesksService/RoomsService.create() requires
-    // a rate on every new desk/room going forward.
+
     const amountCents = this.calculateAmountCents(
       bookable,
       new Date(startTime),
@@ -568,10 +483,7 @@ export class BookingsService {
       );
     }
 
-    // Free up any abandoned hold on this exact resource first — a
-    // PENDING booking nobody ever paid for (or a FAILED one nobody
-    // retried) would otherwise still block this create() attempt via
-    // the DB's exclusion constraint even though it's long abandoned.
+   
     const staleHolds = await this.prisma.booking.findMany({
       where: {
         bookableType,
@@ -590,17 +502,7 @@ export class BookingsService {
     );
 
     try {
-      // A single insert is already atomic, so no $transaction wrapper is
-      // needed. The overlap guarantee comes from the database's
-      // no_overlapping_bookings EXCLUDE constraint (caught below as a 409),
-      // not from application-level locking.
-      //
-      // When payment is required the row is created PENDING *with* its hold
-      // expiry in the same insert. Previously it was inserted UNPAID with no
-      // expiry and only upgraded after the PaymentIntent was created, so a
-      // crash in between left a slot blocked forever (nothing ever expired
-      // it). Now an abandoned row carries holdExpiresAt and is released by
-      // the same expiry logic as any other hold.
+    
       const booking = await this.prisma.booking.create({
         data: {
           bookableType,
@@ -640,13 +542,7 @@ export class BookingsService {
           clientSecret = result.clientSecret;
         } catch {
 
-          /*
-            Payment setup failed.
-
-            Remove booking because a failed
-            payment should not block the slot.
-          */
-
+        
           await this.prisma.booking.delete({
             where: {
               id: booking.id,
@@ -668,11 +564,7 @@ export class BookingsService {
       );
 
 
-      // clientSecret is NOT a Booking column — it's Stripe's ephemeral
-      // token for confirming this specific PaymentIntent client-side
-      // (via Stripe.js). Returned once here so the frontend can
-      // immediately render a payment form; it is never persisted or
-      // returned again from any other endpoint (e.g. GET /bookings).
+     
       return { ...updatedBooking, clientSecret };
 
 
@@ -703,14 +595,7 @@ export class BookingsService {
     }
   }
 
-  // Lets a Member re-attempt payment on their own booking after a
-  // card decline (paymentStatus FAILED), or complete payment on a
-  // booking that was created UNPAID because the Space Manager hadn't
-  // finished Stripe onboarding yet at booking time and has since done
-  // so. Does NOT touch PAID bookings (nothing to retry) or PENDING
-  // ones (a PaymentIntent is already awaiting confirmation for those
-  // — creating a second one would let the same slot get double-billed
-  // if both were ever confirmed).
+
   async retryPayment(
     bookingId: string,
     spaceId: string,
@@ -729,10 +614,6 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
 
-    // Confirms the booking's bookable actually belongs to this
-    // tenant — same tenant-isolation check create() does via
-    // resolveBookable, applied here since retryPayment is reached by
-    // booking id alone, not scoped by a spaceId path segment.
     await this.resolveBookable(
       booking.bookableType,
       booking.bookableId,
@@ -882,15 +763,9 @@ export class BookingsService {
       data: {
         paymentStatus: 'PENDING',
         stripePaymentIntentId: paymentIntent.id,
-        // Stage 9: the exact application fee this PaymentIntent was created
-        // with -- read back from Stripe's object rather than recomputed, so
-        // the stored number can never disagree with what was really charged.
+       
         platformFeeCents: paymentIntent.application_fee_amount ?? null,
-        // Refreshed on every call, including retries — a retry means
-        // the user is actively engaged right now, so they get a full
-        // fresh window rather than inheriting whatever was left of
-        // the original hold (which may already be seconds from
-        // expiring, undermining the point of letting them retry).
+       
         holdExpiresAt: new Date(
           Date.now() + HOLD_DURATION_MINUTES * 60 * 1000,
         ),

@@ -21,14 +21,7 @@ export interface SignupInput {
   email: string;
   password: string;
   // SPACE_MANAGER: creates a brand-new space (spaceName required).
-  // MEMBER: creates a plain platform account with no space at all —
-  // picking one is a separate step after signup (SpacesService.join,
-  // via POST /spaces/:id/join from the "browse all spaces" screen),
-  // not a dropdown shown during registration. That dropdown used to
-  // be here and got removed on purpose: with many spaces on the
-  // platform, forcing a choice before the account even exists doesn't
-  // scale, and it's not needed for the account to be created. There's
-  // still no self-serve path to PLATFORM_ADMIN.
+
   role: 'SPACE_MANAGER' | 'MEMBER';
   spaceName?: string;
 }
@@ -47,9 +40,6 @@ export class AuthService {
       where: { email },
     });
 
-    // Same generic error whether the email doesn't exist or the
-    // password is wrong — don't let the response leak which emails
-    // are registered.
     if (!user || !user.password) {
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -90,9 +80,6 @@ export class AuthService {
       input.spaceName!,
     );
   }
-
-  // "List my space": creates a brand-new Space and its first user
-  // (SPACE_MANAGER) in one transaction, then logs them straight in.
   private async signupAsSpaceManager(
     name: string,
     email: string,
@@ -124,10 +111,7 @@ export class AuthService {
 
         return this.buildAuthResult(user);
       } catch (err) {
-        // P2002 = unique constraint violation. Only retry with a new
-        // slug if the *slug* collided — an email collision won't fix
-        // itself on retry, so surface that immediately instead of
-        // silently trying 5 times to fail the same way.
+       
         const isUniqueViolation =
           err instanceof Prisma.PrismaClientKnownRequestError &&
           err.code === 'P2002';
@@ -153,11 +137,6 @@ export class AuthService {
     );
   }
 
-  // "Rent a space": creates a plain MEMBER account with no space at
-  // all -- picking one happens afterward, via SpacesService.join
-  // (POST /spaces/:id/join) from a "browse all spaces" screen. This
-  // used to look a space up by id/slug right here at signup; that's
-  // gone on purpose (see SignupInput's comment).
   private async signupAsMember(
     name: string,
     email: string,

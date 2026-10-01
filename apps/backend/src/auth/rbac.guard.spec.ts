@@ -19,9 +19,6 @@ describe('RbacGuard', () => {
     } as unknown as ExecutionContext;
   }
 
-  // Key-aware reflector: the guard now reads two metadata keys
-  // (IS_PUBLIC_KEY and ROLES_KEY), so a single canned return value
-  // would answer both the same way.
   function guardWith(opts: { roles?: Role[]; isPublic?: boolean }) {
     const reflector = {
       getAllAndOverride: (key: string) =>

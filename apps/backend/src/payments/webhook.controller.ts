@@ -25,13 +25,7 @@ export class WebhookController {
     private readonly prisma: PrismaService,
   ) {}
 
-  // Public: Stripe calls this directly with no JWT. Its
-  // stripe-signature header (verified below) is the actual auth
-  // mechanism here, not anything JwtAuthGuard checks.
-  //
-  // @SkipThrottle(): Stripe delivers (and retries) from a small set of IPs;
-  // rate limiting them would drop real payment events. The signature check
-  // below is what protects this route.
+
   @SkipThrottle()
   @Public()
   @SkipTenantCheck()
@@ -83,13 +77,7 @@ export class WebhookController {
           break;
         }
 
-        // Conditional transition, not a blind update. Stripe delivers
-        // events at-least-once and out of order, so the same
-        // payment_intent.succeeded can arrive twice, or after the booking
-        // has already moved on (refunded, cancelled because its desk was
-        // deleted). A blind update would rewrite paidAt on a replay and
-        // could drag a REFUNDED booking back to PAID. Only bookings that are
-        // still waiting for payment may become PAID, so a replay is a no-op.
+       
         const { count } = await this.prisma.booking.updateMany({
           where: {
             id: bookingId,

@@ -11,19 +11,7 @@ import { Role } from '@prisma/client';
 import { ROLES_KEY } from './roles.decorator';
 import { IS_PUBLIC_KEY } from './public.decorator';
 
-// Registered as a GLOBAL guard in app.module.ts (after JwtAuthGuard and
-// TenantGuard), and DENY-BY-DEFAULT: every route must either be @Public()
-// or declare @Roles(...). A route that declares neither is refused.
-//
-// Why deny-by-default: the previous version was attached route-by-route
-// with @UseGuards(RbacGuard) and allowed the request when no @Roles() was
-// present, so a new endpoint that forgot either decorator was silently open
-// to every authenticated role (GET /spaces/me and GET /spaces/:id were
-// exactly that). Forgetting a decorator now fails closed (403) and is caught
-// the first time the route is called, instead of shipping as a hole.
-//
-// Reads the role off req.user (verified from the JWT by JwtAuthGuard),
-// never off a request header.
+
 @Injectable()
 export class RbacGuard implements CanActivate {
   private readonly logger = new Logger(RbacGuard.name);

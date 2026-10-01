@@ -3,10 +3,7 @@ import { PrismaClient, Role } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import * as bcrypt from 'bcryptjs';
 
-// Dev-only shared password for every seeded user. Fine for a local/demo
-// DB seeded from this script; never used for anything real. Printed at
-// the end of main() so it doesn't need to be remembered/documented
-// separately from the seed data it belongs to.
+
 const DEV_PASSWORD = 'password123';
 
 const connectionString = process.env.DATABASE_URL;

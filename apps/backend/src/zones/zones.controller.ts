@@ -79,8 +79,7 @@ export class ZonesController {
     return this.deletionService.getImpact('ZONE', id, requireSpaceId(req));
   }
 
-  // Soft-deletes the zone AND everything in it. With upcoming bookings it
-  // answers 409 ACTIVE_BOOKINGS until called again with confirmRefund=true.
+  
   @Roles(Role.SPACE_MANAGER)
   @Delete(':id')
   remove(

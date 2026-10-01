@@ -6,9 +6,7 @@ import type { Request } from 'express';
 // from the verified JWT's `sub` claim.
 export function getCallerUserId(req: Request): string {
   if (!req.user) {
-    // Unreachable on any route that isn't @Public() — JwtAuthGuard
-    // throws first. Guard against it anyway rather than returning
-    // `undefined` disguised as a string.
+   
     throw new UnauthorizedException('No authenticated user on request');
   }
 

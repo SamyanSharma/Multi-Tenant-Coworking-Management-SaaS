@@ -29,12 +29,7 @@ export class SpacesService {
     return this.prisma.space.findMany();
   }
 
-  // Unauthenticated directory for the signup page's "browse spaces"
-  // flow. Deliberately narrow: no slug (that's still the private join
-  // code), no Stripe/manager fields — just enough for a prospective
-  // Member to pick a space (name, indicative price, and rough size).
-  // Counts reuse the same _count/groupBy aggregate pattern as
-  // AdminService.overview() — never fetch-and-sum in JS.
+ 
   async findPublic(): Promise<PublicSpace[]> {
     const [spaces, memberGroups, zoneCounts] = await Promise.all([
       this.prisma.space.findMany({

@@ -11,12 +11,6 @@ import { Role } from '@prisma/client';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import type { JwtPayload } from './auth.service';
 
-// Registered as a global guard in app.module.ts, running BEFORE
-// TenantGuard/RbacGuard so req.user is populated before either of
-// them runs. This is what replaces the old x-user-role/x-user-id
-// header-trust model — those headers are no longer read anywhere
-// except x-space-id, which TenantGuard still allows PLATFORM_ADMIN to
-// set explicitly (see TenantGuard's comments).
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(

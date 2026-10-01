@@ -56,27 +56,7 @@ const ACTIVE_BOOKING_SELECT = {
 
 type Db = Prisma.TransactionClient;
 
-/**
- * Stage 9: soft delete of Desk / Room / Zone with cancel-and-refund.
- *
- * Shape of a delete (see ARCHITECTURE.md, "Stage 9 design"):
- *  1. ONE database transaction, no network calls inside it:
- *       - re-check the target belongs to the caller's space and is live,
- *       - find the ACTIVE bookings on it (upcoming, not cancelled),
- *       - if there are some and the caller did not confirm -> 409 + impact,
- *       - soft-delete the target and its whole subtree (same timestamp),
- *       - mark each active booking cancelled; PAID ones go to REFUND_PENDING.
- *  2. AFTER commit, per booking and failure-isolated: cancel the open
- *     PaymentIntent / issue the Stripe refund (idempotent), then record the
- *     outcome. A refund that fails is REFUND_FAILED and can be retried; the
- *     deletion itself is never rolled back because of Stripe.
- *  3. Broadcast socket events so open floor plans update.
- *
- * Why "intent first, side effects after": a DB transaction cannot include a
- * Stripe call. Committing the intent (REFUND_PENDING) first means a crash
- * between the two steps leaves a visible, retryable state instead of a
- * half-deleted, half-refunded one.
- */
+
 @Injectable()
 export class DeletionService {
   private readonly logger = new Logger(DeletionService.name);
@@ -441,9 +421,7 @@ export class DeletionService {
     return { succeeded, failed, refundedCents };
   }
 
-  // A held (PENDING/FAILED) booking has an open PaymentIntent the member
-  // could still pay. Cancel it. If it turns out the member already paid,
-  // treat the booking like a paid one and refund.
+  
   private async releasePendingPayment(b: ActiveBooking) {
     try {
       const outcome = await this.stripeService.cancelPaymentIntent(

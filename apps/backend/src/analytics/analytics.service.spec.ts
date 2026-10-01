@@ -1,9 +1,6 @@
 import { AnalyticsService } from './analytics.service';
 
-// Mocks respond based on the shape of the `where` clause passed in,
-// rather than call order — call order is an implementation detail
-// (Promise.all array position) that shouldn't be part of what the
-// test locks in.
+
 function buildPrismaMock(opts: {
   deskIds: string[];
   roomIds: string[];
@@ -16,8 +13,7 @@ function buildPrismaMock(opts: {
   previousPeriodPaidAmounts: number[];
 }) {
   return {
-    // Stage 9: utilization's denominator only needs COUNTS of live
-    // desks/rooms; bookings are scoped by Booking.spaceId, not by ids.
+   
     desk: {
       count: jest.fn().mockResolvedValue(opts.deskIds.length),
     },

@@ -36,11 +36,6 @@ export class EventsGateway
   @WebSocketServer()
   server!: Server;
 
-  // Previously trusted handshake.auth.spaceId/.role directly — any
-  // client could join any tenant's room just by claiming its id. Now
-  // the client sends a real JWT (handshake.auth.token, the same token
-  // from POST /auth/login) and spaceId/role come from verifying it,
-  // the same as JwtAuthGuard does for REST requests.
   handleConnection(client: Socket): void {
     const token = client.handshake.auth?.token as
       | string

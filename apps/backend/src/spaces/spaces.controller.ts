@@ -27,11 +27,6 @@ export class SpacesController {
   findAll() {
     return this.spacesService.findAll();
   }
-
-  // Public directory for the signup page's "browse spaces" flow — must
-  // be registered before the `:id` route below, or Nest would match
-  // "/spaces/public" as `id: 'public'` instead (same ordering reason
-  // "me" is declared ahead of ":id").
   @Public()
   @SkipTenantCheck()
   @Get('public')

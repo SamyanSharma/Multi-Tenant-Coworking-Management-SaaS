@@ -6,10 +6,7 @@ export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
  
-  async bookingsPerZone(spaceId: string) {
-    // Live zones only (a deleted zone disappears from the chart), but each
-    // zone's desks/rooms are read WITHOUT the live filter so bookings made
-    // on a since-deleted desk still count toward its zone's history.
+ 
     const zones = await this.prisma.zone.findMany({
       where: { spaceId, deletedAt: null },
       select: {
@@ -63,11 +60,7 @@ export class AnalyticsService {
 
     const now = new Date();
 
-    // "vs last month" cards used to show hardcoded literals (+12.5%
-    // etc.) with no data behind them at all. Real comparison instead:
-    // rolling 30-day windows rather than calendar months, so it's a
-    // fair day-count comparison (today vs. 30 days ago) instead of a
-    // full previous month vs. a partial current month.
+   
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const currentPeriodStart = new Date(now.getTime() - THIRTY_DAYS_MS);
     const previousPeriodStart = new Date(
@@ -139,10 +132,7 @@ export class AnalyticsService {
       activeBookings,
       totalBookings,
       utilizationRate,
-      // null means "not expressible as a percentage" — e.g. previous
-      // period was 0 and current period is >0 (infinite growth), or
-      // there's simply no bookings/revenue in either period yet. The
-      // frontend shows a neutral "New" badge instead of a fake number.
+     
       revenueChangePct: this.pctChange(
         currentPeriodRevenue,
         previousPeriodRevenue,
@@ -154,16 +144,7 @@ export class AnalyticsService {
     };
   }
 
-  // Chart data for the manager's Analytics page: one row per UTC day for the
-  // last `days` days (zero-filled, so the x-axis has no gaps), plus how the
-  // space's bookings split between desks and rooms.
-  //
-  // Same rules as spaceSummary so the charts agree with the cards above them:
-  // this space only (Booking.spaceId snapshot), cancelled bookings excluded,
-  // revenue = PAID bookings only, and a booking is dated by createdAt (the
-  // only timestamp the summary's "vs last 30 days" windows use as well).
-  // Days are UTC days: a booking made at 01:00 IST on the 5th is bucketed
-  // on the 4th.
+  
   async trends(spaceId: string, days = 30) {
     const window = Math.min(Math.max(Math.trunc(days) || 30, 7), 90);
 

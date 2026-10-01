@@ -103,24 +103,7 @@ export interface AdminMemberRow {
   createdAt: Date;
 }
 
-/**
- * Platform-wide numbers for the Platform Admin dashboard.
- *
- * Definitions (part of the product contract — see ARCHITECTURE.md §9.9):
- *  - active space   : deletedAt IS NULL
- *  - members        : MEMBER users attached to a live space
- *  - net revenue    : SUM(amountCents) of bookings that are PAID right now
- *                     (refunded money is NOT revenue)
- *  - refunded       : SUM(refundedAmountCents) of REFUNDED bookings
- *  - pending refund : amount of REFUND_PENDING / REFUND_FAILED bookings
- *  - collected      : net + refunded + pending refund  (money that ever came in)
- *  - platform fee   : SUM(platformFeeCents) of PAID bookings (the 5%)
- *  - last 30d       : PAID bookings whose paidAt is in the trailing 30 days.
- *                     This is a trailing-30-day figure, NOT MRR — the product
- *                     has per-booking payments only, no subscriptions.
- * Everything is aggregated in the database (groupBy / count), never by
- * fetching booking rows and summing in JavaScript. All amounts are USD cents.
- */
+
 @Injectable()
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
@@ -290,26 +273,7 @@ export class AdminService {
     };
   }
 
-  // Read-only, admin-only detail for one space — the "click into a
-  // space" drill-down. Deliberately NOT built on top of ZonesService /
-  // BookingsService / SpacesService: those are tenant-scoped by
-  // JWT/TenantGuard and, in BookingsService's case, perform writes and
-  // live Stripe calls as a side effect of a GET (see PROGRESS.md
-  // finding A-06) — the last thing an admin browsing spaces should
-  // trigger. This mirrors overview()'s own pattern instead: pure
-  // database aggregates, scoped to one spaceId via `where`.
-  // Cross-tenant time series for the Platform Admin charts: per UTC day over
-  // the last `days` days (zero-filled). Day-bucketing can't be expressed with
-  // Prisma's groupBy, so it is a small raw SQL GROUP BY, i.e. still
-  // aggregated in the database, never by fetching rows into JS.
-  //
-  // Definitions match overview(): revenue = PAID bookings only, dated by
-  // paidAt (a refunded booking leaves PAID and so leaves its day: refunded
-  // money is not revenue). "Members" are all MEMBER accounts ever created
-  // and "spaces" all spaces ever created (closed ones included), so these
-  // are growth-of-signups numbers, not the "live" totals on the KPI cards.
-  // All casts to ::int are deliberate: COUNT/SUM are bigint in Postgres and
-  // a BigInt cannot be JSON-serialised.
+  
   async trends(days = 30, now: Date = new Date()): Promise<AdminTrends> {
     const window = Math.min(Math.max(Math.trunc(days) || 30, 7), 90);
     const start = new Date(
@@ -437,9 +401,7 @@ export class AdminService {
     };
   }
 
-  // Paginated (never the whole table — this is the "transactions" tab,
-  // which A-06 flags as an unbounded read even for a manager's own
-  // space; an admin drill-down is not the place to repeat that).
+  
   async getSpaceBookings(
     spaceId: string,
     page = 1,
