@@ -12,7 +12,6 @@ describe('TenantGuard', () => {
     guard = new TenantGuard(reflector);
   });
 
-.
   function mockContext(
     user: { id: string; role: Role; spaceId: string | null } | undefined,
     headers: Record<string, string> = {},
