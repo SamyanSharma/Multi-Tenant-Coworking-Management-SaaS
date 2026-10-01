@@ -29,6 +29,7 @@ describe('Payment retry & holds (e2e)', () => {
         application_fee_amount: 50,
       };
     }),
+    cancelPaymentIntent: jest.fn(async () => 'canceled' as const),
     getPaymentIntentStatus: jest.fn(async () => ({
       status: 'requires_payment_method',
       hasFailedAttempt: false,
@@ -152,5 +153,37 @@ describe('Payment retry & holds (e2e)', () => {
     expect(await ctx.prisma.booking.count({ where: { bookableId: T.desk.id, startTime: new Date(body.startTime) } })).toBe(0);
 
     await http().post('/bookings').set('Authorization', `Bearer ${T.memberToken}`).send(body).expect(201);
+  });
+  it('an expired hold is released by the next booking attempt: its PaymentIntent is cancelled first, then the slot can be rebooked', async () => {
+    const start = new Date('2031-08-06T10:00:00.000Z');
+    const stale = await ctx.prisma.booking.create({
+      data: {
+        bookableType: 'DESK',
+        bookableId: T.desk.id,
+        userId: T.member.id,
+        spaceId: T.space.id,
+        startTime: start,
+        endTime: new Date(start.getTime() + 3_600_000),
+        amountCents: 1000,
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: `pi_abandoned_${ctx.uid()}`,
+        holdExpiresAt: new Date(Date.now() - 60_000), // lapsed a minute ago
+      } as never,
+    });
+    fakeStripe.cancelPaymentIntent.mockClear();
+
+    await http()
+      .post('/bookings')
+      .set('Authorization', `Bearer ${T.memberToken}`)
+      .send({
+        bookableType: 'DESK',
+        bookableId: T.desk.id,
+        startTime: start.toISOString(),
+        endTime: new Date(start.getTime() + 3_600_000).toISOString(),
+      })
+      .expect(201);
+
+    expect(fakeStripe.cancelPaymentIntent).toHaveBeenCalledWith(stale.stripePaymentIntentId);
+    expect(await ctx.prisma.booking.findUnique({ where: { id: stale.id } })).toBeNull();
   });
 });

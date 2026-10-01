@@ -59,6 +59,7 @@ function buildDeps() {
       application_fee_amount: 50,
     }),
     getPaymentIntentStatus: jest.fn(),
+    cancelPaymentIntent: jest.fn().mockResolvedValue('canceled'),
   };
 
   const service = new BookingsService(
@@ -158,8 +159,12 @@ describe('BookingsService.create — payment flow', () => {
     });
   });
 
-  it('clears any abandoned hold on this exact resource before attempting to create the new booking', async () => {
-    const { service, prisma } = buildDeps();
+  it('clears any abandoned hold on this exact resource before attempting to create the new booking — cancelling its PaymentIntent first', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    // First findMany call = the stale-hold lookup inside create().
+    prisma.booking.findMany.mockResolvedValueOnce([
+      { id: 'stale-1', stripePaymentIntentId: 'pi_stale' },
+    ]);
     prisma.booking.create.mockResolvedValue({ id: 'booking-5', amountCents: 1000 });
     prisma.booking.update.mockResolvedValue({
       id: 'booking-5',
@@ -178,13 +183,18 @@ describe('BookingsService.create — payment flow', () => {
       'user-1',
     );
 
-    expect(prisma.booking.deleteMany).toHaveBeenCalledWith({
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
       where: {
         bookableType: BookableType.DESK,
         bookableId: 'desk-1',
         paymentStatus: { in: ['PENDING', 'FAILED'] },
         holdExpiresAt: { lt: expect.any(Date) },
       },
+      select: { id: true, stripePaymentIntentId: true },
+    });
+    expect(stripeService.cancelPaymentIntent).toHaveBeenCalledWith('pi_stale');
+    expect(prisma.booking.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['stale-1'] } },
     });
   });
 
@@ -368,6 +378,72 @@ describe('BookingsService.findAllForSpace — payment reconciliation', () => {
     });
   });
 
+  it('cancels the PaymentIntent BEFORE deleting an expired hold, so a late card confirmation cannot charge for a slot that was released', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    const order: string[] = [];
+    stripeService.cancelPaymentIntent.mockImplementation(async () => {
+      order.push('cancel');
+      return 'canceled';
+    });
+    prisma.booking.deleteMany.mockImplementation(async () => {
+      order.push('delete');
+      return { count: 1 };
+    });
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: new Date(Date.now() - 60 * 1000),
+      },
+    ]);
+
+    await service.findAllForSpace('space-1');
+
+    expect(stripeService.cancelPaymentIntent).toHaveBeenCalledWith('pi_1');
+    expect(order).toEqual(['cancel', 'delete']);
+  });
+
+  it('keeps an expired hold (and its slot) if the member paid at the last moment — marks it PAID instead of deleting a paid booking', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    stripeService.cancelPaymentIntent.mockResolvedValue('succeeded');
+    prisma.booking.updateMany.mockResolvedValue({ count: 1 });
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: new Date(Date.now() - 60 * 1000),
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+    const call = prisma.booking.updateMany.mock.calls[0][0];
+    expect(call.data.paymentStatus).toBe('PAID');
+    expect(call.where.paymentStatus).toEqual({ in: ['PENDING', 'FAILED'] });
+  });
+
+  it('keeps an expired hold if Stripe cannot confirm the cancellation — never frees a slot while the charge may still be live', async () => {
+    const { service, prisma, stripeService } = buildDeps();
+    stripeService.cancelPaymentIntent.mockRejectedValue(new Error('stripe down'));
+    prisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'b1',
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: 'pi_1',
+        holdExpiresAt: new Date(Date.now() - 60 * 1000),
+      },
+    ]);
+
+    const result = await service.findAllForSpace('space-1');
+
+    expect(result).toHaveLength(1);
+    expect(prisma.booking.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('deletes and excludes a FAILED booking whose hold has expired', async () => {
     const { service, prisma } = buildDeps();
     const expiredAt = new Date(Date.now() - 60 * 1000);
@@ -433,6 +509,7 @@ describe('BookingsService.retryPayment', () => {
       bookableId: 'desk-1',
       paymentStatus: 'FAILED',
       amountCents: 1000,
+      stripePaymentIntentId: 'pi_old',
       holdExpiresAt: expiredAt,
     });
 
@@ -440,8 +517,9 @@ describe('BookingsService.retryPayment', () => {
       service.retryPayment('booking-1', 'space-1', 'user-1'),
     ).rejects.toThrow(BadRequestException);
 
-    expect(prisma.booking.delete).toHaveBeenCalledWith({
-      where: { id: 'booking-1' },
+    expect(stripeService.cancelPaymentIntent).toHaveBeenCalled();
+    expect(prisma.booking.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['booking-1'] } },
     });
     expect(stripeService.createBookingPaymentIntent).not.toHaveBeenCalled();
   });

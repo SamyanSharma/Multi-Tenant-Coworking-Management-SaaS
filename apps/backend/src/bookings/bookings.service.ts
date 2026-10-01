@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 
 import { BookableType, PaymentStatus, Prisma } from '@prisma/client';
@@ -26,6 +27,8 @@ const HOLD_DURATION_MINUTES = 15;
 
 @Injectable()
 export class BookingsService {
+  private readonly logger = new Logger(BookingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventsGateway: EventsGateway,
@@ -260,6 +263,71 @@ export class BookingsService {
     }));
   }
 
+  // Releases expired holds WITHOUT leaving a payable PaymentIntent behind.
+  //
+  // Deleting the booking row alone is not enough: the member's checkout
+  // form may still be open, and a PaymentIntent that stays live could be
+  // confirmed after the slot was handed to someone else — a successful
+  // charge for a booking that no longer exists. So for each expired hold we
+  // first cancel its PaymentIntent, and only then delete the row:
+  //   - cancelled            -> safe to delete (slot freed)
+  //   - already succeeded    -> the member paid at the last moment: mark the
+  //                             booking PAID and KEEP it (never delete a
+  //                             paid booking)
+  //   - Stripe call failed   -> KEEP the row and try again on the next pass;
+  //                             freeing the slot while the charge is still
+  //                             live is the one outcome we must avoid.
+  // Returns the ids that were actually released.
+  private async releaseExpiredHolds(
+    rows: { id: string; stripePaymentIntentId: string | null }[],
+  ): Promise<Set<string>> {
+    const released = new Set<string>();
+
+    for (const row of rows) {
+      if (!row.stripePaymentIntentId) {
+        released.add(row.id);
+        continue;
+      }
+
+      try {
+        const outcome = await this.stripeService.cancelPaymentIntent(
+          row.stripePaymentIntentId,
+        );
+
+        if (outcome === 'succeeded') {
+          await this.prisma.booking.updateMany({
+            where: {
+              id: row.id,
+              paymentStatus: { in: ['PENDING', 'FAILED'] },
+            },
+            data: {
+              paymentStatus: 'PAID',
+              holdExpiresAt: null,
+              paidAt: new Date(),
+            },
+          });
+          continue;
+        }
+
+        released.add(row.id);
+      } catch (err) {
+        this.logger.warn(
+          `Could not cancel PaymentIntent ${row.stripePaymentIntentId} for ` +
+            `expired booking ${row.id}; keeping the hold and retrying later: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+      }
+    }
+
+    if (released.size > 0) {
+      await this.prisma.booking.deleteMany({
+        where: { id: { in: [...released] } },
+      });
+    }
+
+    return released;
+  }
+
   // A held slot (PENDING or FAILED with holdExpiresAt in the past) is
   // deleted outright, not just hidden — leaving the row around would
   // still block that time range via the no_overlapping_bookings
@@ -270,6 +338,7 @@ export class BookingsService {
       id: string;
       paymentStatus: string;
       holdExpiresAt: Date | null;
+      stripePaymentIntentId?: string | null;
     },
   >(bookings: T[]): Promise<T[]> {
     const now = new Date();
@@ -285,13 +354,14 @@ export class BookingsService {
       return bookings;
     }
 
-    await this.prisma.booking.deleteMany({
-      where: { id: { in: expired.map((b) => b.id) } },
-    });
+    const releasedIds = await this.releaseExpiredHolds(
+      expired.map((b) => ({
+        id: b.id,
+        stripePaymentIntentId: b.stripePaymentIntentId ?? null,
+      })),
+    );
 
-    const expiredIds = new Set(expired.map((b) => b.id));
-
-    return bookings.filter((b) => !expiredIds.has(b.id));
+    return bookings.filter((b) => !releasedIds.has(b.id));
   }
 
   // Self-heals bookings stuck at PENDING because
@@ -493,14 +563,18 @@ export class BookingsService {
     // PENDING booking nobody ever paid for (or a FAILED one nobody
     // retried) would otherwise still block this create() attempt via
     // the DB's exclusion constraint even though it's long abandoned.
-    await this.prisma.booking.deleteMany({
+    const staleHolds = await this.prisma.booking.findMany({
       where: {
         bookableType,
         bookableId,
         paymentStatus: { in: ['PENDING', 'FAILED'] },
         holdExpiresAt: { lt: new Date() },
       },
+      select: { id: true, stripePaymentIntentId: true },
     });
+    if (staleHolds.length > 0) {
+      await this.releaseExpiredHolds(staleHolds);
+    }
 
     const paymentsEnabled = Boolean(
       spaceManager.stripeAccountId && spaceManager.stripeOnboardingComplete,
@@ -684,7 +758,19 @@ export class BookingsService {
       // fresh PaymentIntent, since someone else may have booked this
       // slot in the meantime. Delete it and tell them to start over,
       // same as the automatic expiry paths in create()/findAllForSpace.
-      await this.prisma.booking.delete({ where: { id: booking.id } });
+      const released = await this.releaseExpiredHolds([
+        {
+          id: booking.id,
+          stripePaymentIntentId: booking.stripePaymentIntentId,
+        },
+      ]);
+      if (!released.has(booking.id)) {
+        // Either the member's last-second payment went through, or Stripe
+        // could not confirm the cancellation. Don't claim the slot is free.
+        throw new ConflictException(
+          'We could not confirm this payment yet — please refresh in a moment.',
+        );
+      }
       throw new BadRequestException(
         'Your hold on this slot expired — please book again.',
       );
