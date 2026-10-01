@@ -1,45 +1,36 @@
-# Optional: Booking overlap exclusion constraint
+# Booking overlap exclusion constraint — historical note
 
-**Status: NOT applied. Team decision pending — see ARCHITECTURE.md
-Concurrency Strategy and the Stage 1-4 PR description's "Known
-limitations" section.**
+**Status: APPLIED.** It is a regular migration:
+`prisma/migrations/20260821202823_add_booking_overlap_exclusion/`. Nothing in
+this folder needs to be run. `add_booking_overlap_exclusion.sql` is kept only
+as the original write-up of the constraint.
 
-## The gap this closes
+## Why it exists
 
-The `@@unique([bookableType, bookableId, startTime])` constraint
-currently in `schema.prisma` only rejects a second booking with the
-*exact same* `startTime`. A booking from 2:00-3:00 and another from
-2:30-3:30 on the same desk have different `startTime` values, so both
-succeed today — a real double-booking the current constraint does not
-catch.
+`@@unique([bookableType, bookableId, startTime])` only rejects a second
+booking with the *exact same* `startTime`. A 2:00–3:00 booking and a
+2:30–3:30 booking on the same desk have different start times, so the unique
+index alone lets both through — a real double-booking.
 
-`add_booking_overlap_exclusion.sql` adds a Postgres `EXCLUDE` constraint
-that blocks genuine range overlaps, enforced by the database itself.
+A Postgres `EXCLUDE USING gist` constraint rejects genuinely overlapping time
+ranges for the same resource, and the database enforces it atomically, so it
+holds even when many requests arrive at the same moment. That is stronger than
+application-level locking.
 
-## Why this isn't just applied automatically
+## How the app uses it
 
-1. Prisma doesn't support `EXCLUDE` constraints in `schema.prisma` — it
-   has to be hand-applied as raw SQL, which means `prisma migrate dev`
-   alone won't pick it up.
-2. Whether to add this now vs. treat it as a documented follow-up is a
-   real scope/timeline tradeoff for a 4-week capstone, not a pure
-   correctness fix to apply silently — see the Timeline Risk Note in
-   PRD.md. That's a team call.
+- Prisma's schema language cannot express `EXCLUDE`, so it lives in raw SQL in
+  the migration (Prisma ignores objects it cannot model, so `migrate dev` does
+  not drop it).
+- Postgres raises SQLSTATE `23P01` (exclusion violation) rather than Prisma's
+  `P2002`; `BookingsService.create` catches both and answers `409 Conflict`.
+- Ranges are half-open, so a booking ending at 11:00 and one starting at 11:00
+  do not clash.
+- Proof: `apps/backend/test/booking-overlap.e2e-spec.ts`.
 
-## How to apply it, if the team decides to
+## Known limitation
 
-```bash
-# From apps/backend, with DATABASE_URL pointing at your dev DB:
-npx prisma migrate dev --create-only --name add_booking_overlap_exclusion
-# This creates an empty migration folder under prisma/migrations/.
-# Copy the contents of add_booking_overlap_exclusion.sql into the
-# generated migration.sql file, then:
-npx prisma migrate dev
-```
-
-After applying, `BookingsService.create`'s catch block needs a second
-branch: Postgres raises SQLSTATE `23P01` (exclusion violation) rather
-than Prisma's `P2002` (unique violation) for this case. Recommend
-triggering a real overlap locally and inspecting the actual thrown
-error shape before writing that branch, rather than guessing the exact
-property Prisma surfaces it under.
+The constraint does not exclude cancelled bookings. Today a booking is only
+cancelled when its desk/room is soft-deleted, so nothing needs to be re-booked.
+If member-initiated cancellation is ever added, the constraint needs a
+`WHERE (cancelledAt IS NULL)` predicate so a cancelled slot can be rebooked.

@@ -60,3 +60,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .agents/
 .claude/
 .windsurf/
+
+# Keep the committed template even though .env.* is ignored above
+!.env.example

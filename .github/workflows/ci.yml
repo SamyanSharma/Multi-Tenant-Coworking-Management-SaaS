@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: coworking
+          POSTGRES_PASSWORD: coworking_ci_pw
+          POSTGRES_DB: coworking_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U coworking"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://coworking:coworking_ci_pw@localhost:5432/coworking_test
+      TEST_DATABASE_URL: postgresql://coworking:coworking_ci_pw@localhost:5432/coworking_test
+      JWT_SECRET: ci-only-secret
+      STRIPE_SECRET_KEY: sk_test_ci_dummy_key
+      STRIPE_WEBHOOK_SECRET: whsec_ci_dummy_secret
+
+    defaults:
+      run:
+        working-directory: apps/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: .
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Apply migrations to the test database
+        run: npx prisma migrate deploy
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test -- --ci
+
+      - name: End-to-end tests (real Postgres)
+        run: npm run test:e2e -- --runInBand --ci
