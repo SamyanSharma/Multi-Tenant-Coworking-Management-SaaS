@@ -9,7 +9,7 @@
 
 A B2B web platform that lets independent coworking operators run their space on one shared application, while each space's data stays isolated from every other space. Members see a live floor plan, book desks and rooms, and pay online. Managers configure their space, pricing and payouts. A platform administrator oversees every space.
 
-Built as a team capstone project at Chitkara University (Course Code: 25CS022).
+Built as a team capstone project at Chitkara University.
 
 ![Member Browse Zone Floor Plan](docs/screenshots/Member%20Browse%20Zone.png)
 
