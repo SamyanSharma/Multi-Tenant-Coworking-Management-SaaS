@@ -27,6 +27,7 @@ Built as a team capstone project at Chitkara University.
 - [Getting started](#getting-started)
 - [API overview](#api-overview)
 - [Screenshots](#screenshots)
+- [Documentation](#documentation)
 - [Known limitations and roadmap](#known-limitations-and-roadmap)
 - [Team](#team)
 - [License](#license)
@@ -105,6 +106,7 @@ Layers: Next.js client, NestJS controllers and services, Prisma, PostgreSQL. Rea
 ├── apps/
 │   ├── backend/        # NestJS API, Prisma schema, Socket.io gateway
 │   └── frontend/       # Next.js app
+├── docs/               # Project report, presentation and screenshots
 ├── docker-compose.yml  # Local PostgreSQL
 ├── package.json
 └── LICENSE
@@ -230,15 +232,20 @@ cd apps/frontend && npm test
 
 ## Screenshots
 
-<!-- Save images in docs/screenshots/ and replace these placeholders. -->
-
-| Platform Admin OverviewSpace Manager Analytics | Member Browse Spaces |
+| Platform Admin Overview | Member Browse Spaces |
 | --- | --- |
 | ![Platform Admin Overview](docs/screenshots/PlatformAdmin%20Platform%20Overview.png) | ![Member Browse Space](docs/screenshots/Member%20Browse%20Space.png) |
 
 | Space Manager Analytics | Space Manager Bookings |
 | --- | --- |
 | ![Space Manager Analytics](docs/screenshots/SpaceManager%20Analytics.png) | ![Space Manager Bookings](docs/screenshots/SpaceManager%20Bookings.png) |
+
+## Documentation
+
+<!-- VERIFY: change these file names to match the files in your docs/ folder. -->
+
+- [Project Report (PDF)](docs/Project-Report.pdf): architecture, database design, DFDs, challenges and limitations
+- [Project Presentation (PDF)](docs/Project-Presentation.pdf): short overview of the system and key design decisions
 
 ## Known limitations and roadmap
 
