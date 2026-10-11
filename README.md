@@ -244,8 +244,8 @@ cd apps/frontend && npm test
 
 <!-- VERIFY: change these file names to match the files in your docs/ folder. -->
 
-- [Project Report (PDF)](docs/Project-Report.pdf): architecture, database design, DFDs, challenges and limitations
-- [Project Presentation (PDF)](docs/Project-Presentation.pdf): short overview of the system and key design decisions
+- [Project Report (PDF)](docs/Multi-Tenant%20Coworking%20Management%20SaaS%20-%20Project%20Report.pdf): architecture, database design, DFDs, challenges and limitations
+- [Project Presentation (PPT)](docs/Multi-Tenant%20Coworking%20Management%20SaaS%20-%20PPT.pptx): short overview of the system and key design decisions
 
 ## Known limitations and roadmap
 
